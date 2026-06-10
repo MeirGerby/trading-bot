@@ -1,0 +1,9 @@
+{
+  "breakout_volume_ratio": 2.0,
+  "breakout_pct_from_high": 0.98,
+  "momentum_rsi_min": 63.0,
+  "momentum_price_above_ma": 21.0,
+  "options_vol_oi_ratio": 2.0,
+  "options_iv_percentile_min": 30,
+  "min_score_to_alert": 2
+}
