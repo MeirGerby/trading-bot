@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Bot Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; font-size: 14px; padding: 20px; }
+  h1 { font-size: 20px; margin-bottom: 4px; color: #f8fafc; }
+  .subtitle { color: #64748b; font-size: 12px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; }
+  .card.full { grid-column: 1 / -1; }
+  h2 { font-size: 14px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: right; color: #64748b; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #2d3148; }
+  td { padding: 7px 8px; border-bottom: 1px solid #1a1e2e; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .b-breakout { background: #1e3a5f; color: #60a5fa; }
+  .b-momentum { background: #1a3a2a; color: #4ade80; }
+  .b-options  { background: #3a2a1a; color: #fb923c; }
+  .score { font-weight: 700; color: #f8fafc; }
+  .price { color: #a3e635; font-family: monospace; }
+  .time { color: #475569; font-size: 12px; }
+  .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1a1e2e; }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: #94a3b8; }
+  .stat-val { font-weight: 600; }
+  .delta { font-size: 11px; margin-right: 6px; }
+  .up { color: #4ade80; }
+  .down { color: #f87171; }
+  .neutral { color: #64748b; }
+  #refresh-time { color: #334155; font-size: 11px; margin-top: 20px; text-align: center; }
+  .empty { color: #475569; font-size: 13px; text-align: center; padding: 20px 0; }
+</style>
+</head>
+<body>
+
+<h1>📊 Trading Bot Dashboard</h1>
+<p class="subtitle" id="last-updated">טוען...</p>
+
+<div class="grid">
+  <!-- Alerts -->
+  <div class="card full">
+    <h2>התראות אחרונות</h2>
+    <div id="alerts-container"><p class="empty">טוען...</p></div>
+  </div>
+
+  <!-- Weights -->
+  <div class="card">
+    <h2>משקלות נוכחיות</h2>
+    <div id="weights-container"><p class="empty">טוען...</p></div>
+  </div>
+
+  <!-- Feedback -->
+  <div class="card">
+    <h2>פידבק</h2>
+    <div id="feedback-container"><p class="empty">טוען...</p></div>
+  </div>
+</div>
+
+<div id="refresh-time"></div>
+
+<script>
+const SIGNAL_LABELS = { breakout: 'פריצה', momentum: 'מומנטום', options: 'אופציות' };
+
+function badge(sig) {
+  const label = SIGNAL_LABELS[sig] || sig;
+  return `<span class="badge b-${sig}">${label}</span>`;
+}
+
+function fmt(ts) {
+  const d = new Date(ts + 'Z');
+  return d.toLocaleString('he-IL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+async function loadAlerts() {
+  const res = await fetch('/api/alerts');
+  const { alerts } = await res.json();
+  const el = document.getElementById('alerts-container');
+  if (!alerts.length) { el.innerHTML = '<p class="empty">אין התראות עדיין</p>'; return; }
+
+  let html = '<table><thead><tr><th>Ticker</th><th>ניקוד</th><th>סיגנלים</th><th>מחיר</th><th>פרטים</th><th>זמן</th></tr></thead><tbody>';
+  for (const a of alerts) {
+    const badges = (a.signal_types || []).map(badge).join(' ');
+    const details = Object.entries(a.details || {}).map(([k,v]) => `<span style="color:#64748b">${k}:</span> ${v}`).join(' &nbsp;|&nbsp; ');
+    html += `<tr>
+      <td><strong>${a.ticker}</strong></td>
+      <td class="score">${a.score}</td>
+      <td>${badges}</td>
+      <td class="price">$${Number(a.price).toFixed(2)}</td>
+      <td style="font-size:12px;color:#94a3b8">${details}</td>
+      <td class="time">${fmt(a.timestamp)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+async function loadWeights() {
+  const res = await fetch('/api/weights');
+  const { weights } = await res.json();
+  const el = document.getElementById('weights-container');
+
+  const LABELS = {
+    breakout_volume_ratio: 'נפח × ממוצע (פריצה)',
+    breakout_pct_from_high: '% מ-52w High',
+    momentum_rsi_min: 'RSI מינימום',
+    momentum_price_above_ma: 'תקופת MA',
+    options_vol_oi_ratio: 'Vol/OI אופציות',
+    options_iv_percentile_min: 'IV מינימום',
+    min_score_to_alert: 'ניקוד מינימום להתראה',
+  };
+
+  let html = '';
+  for (const [k, v] of Object.entries(weights)) {
+    const cur = Number(v.current);
+    const def = Number(v.default);
+    const diff = cur - def;
+    let deltaHtml = '';
+    if (Math.abs(diff) > 0.0001) {
+      const cls = diff > 0 ? 'up' : 'down';
+      const sign = diff > 0 ? '+' : '';
+      deltaHtml = `<span class="delta ${cls}">(${sign}${diff.toFixed(2)})</span>`;
+    }
+    html += `<div class="stat-row">
+      <span class="stat-label">${LABELS[k] || k}</span>
+      <span class="stat-val">${deltaHtml}${cur}</span>
+    </div>`;
+  }
+  el.innerHTML = html || '<p class="empty">אין נתונים</p>';
+}
+
+async function loadFeedback() {
+  const res = await fetch('/api/feedback');
+  const data = await res.json();
+  const el = document.getElementById('feedback-container');
+
+  const pct = data.total ? Math.round(data.positive / data.total * 100) : 0;
+  let html = `<div class="stat-row"><span class="stat-label">סה"כ פידבק</span><span class="stat-val">${data.total}</span></div>`;
+  html += `<div class="stat-row"><span class="stat-label">חיובי / שלילי</span><span class="stat-val"><span class="up">${data.positive}</span> / <span class="down">${data.negative}</span> &nbsp;<span class="neutral">(${pct}%)</span></span></div>`;
+
+  if (Object.keys(data.by_signal || {}).length) {
+    html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">לפי סוג סיגנל</div>`;
+    for (const [sig, counts] of Object.entries(data.by_signal)) {
+      const total = counts.positive + counts.negative;
+      const p = total ? Math.round(counts.positive / total * 100) : 0;
+      html += `<div class="stat-row">${badge(sig)}<span class="stat-val neutral">${p}% חיובי (${total})</span></div>`;
+    }
+  }
+
+  if (data.top_tickers && data.top_tickers.length) {
+    html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">Top tickers</div>`;
+    for (const t of data.top_tickers) {
+      const total = t.positive + t.negative;
+      const p = total ? Math.round(t.positive / total * 100) : 0;
+      html += `<div class="stat-row"><span class="stat-label">${t.ticker}</span><span class="stat-val neutral">${p}% (${total})</span></div>`;
+    }
+  }
+
+  el.innerHTML = html || '<p class="empty">אין פידבק עדיין</p>';
+}
+
+async function refresh() {
+  await Promise.all([loadAlerts(), loadWeights(), loadFeedback()]);
+  const now = new Date().toLocaleTimeString('he-IL');
+  document.getElementById('last-updated').textContent = `עודכן: ${now}`;
+  document.getElementById('refresh-time').textContent = `רענון אוטומטי כל 30 שניות`;
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

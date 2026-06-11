@@ -10,6 +10,7 @@ Commands:
   /bad_TICKER  — mark last alert for TICKER as bad ❌
   /watchlist   — show current watchlist
 """
+import json
 import logging
 import os
 import re
@@ -26,6 +27,35 @@ logger = logging.getLogger(__name__)
 
 # In-memory: last alert per ticker → signal_types (for feedback linkage)
 _last_alerts: dict[str, list[str]] = {}
+
+_ALERTS_LOG = os.path.join(os.path.dirname(__file__), "data", "alerts_log.json")
+_MAX_LOG_ENTRIES = 200
+
+
+def log_alert(sig) -> None:
+    """Append a sent signal to the persistent alerts log."""
+    try:
+        os.makedirs(os.path.dirname(_ALERTS_LOG), exist_ok=True)
+        if os.path.exists(_ALERTS_LOG):
+            with open(_ALERTS_LOG) as f:
+                store = json.load(f)
+        else:
+            store = {"alerts": []}
+
+        store["alerts"].append({
+            "ticker": sig.ticker,
+            "score": sig.score,
+            "signal_types": sig.signal_types,
+            "price": sig.price,
+            "details": sig.details,
+            "timestamp": datetime.utcnow().isoformat(timespec="seconds"),
+        })
+        store["alerts"] = store["alerts"][-_MAX_LOG_ENTRIES:]
+
+        with open(_ALERTS_LOG, "w") as f:
+            json.dump(store, f, indent=2, ensure_ascii=False)
+    except Exception:
+        logger.exception("Failed to log alert for %s", sig.ticker)
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,6 +82,7 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     for sig in signals[:5]:  # cap at 5 per scan
         _last_alerts[sig.ticker] = sig.signal_types
+        log_alert(sig)
         await update.message.reply_text(sig.format_message(), parse_mode="MarkdownV2")
 
 
@@ -119,6 +150,7 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     for sig in signals[:5]:
         _last_alerts[sig.ticker] = sig.signal_types
+        log_alert(sig)
         await ctx.bot.send_message(
             chat_id=chat_id,
             text=sig.format_message(),
