@@ -4,8 +4,10 @@ and serves the static HTML dashboard.
 """
 import json
 import os
+import time as time_mod
 from pathlib import Path
 
+import yfinance as yf
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -15,6 +17,9 @@ app = FastAPI()
 
 DATA_DIR = Path(__file__).parent / "data"
 STATIC_DIR = Path(__file__).parent / "static"
+
+_chart_cache: dict = {}
+_CHART_CACHE_TTL = 300  # 5 minutes
 
 
 def _read_json(path: Path, default):
@@ -79,3 +84,46 @@ def get_feedback():
         "by_signal": by_signal,
         "top_tickers": top_tickers,
     })
+
+
+@app.get("/api/chart/{ticker}")
+def get_chart(ticker: str, period: str = "1d"):
+    ticker = ticker.upper()
+    cache_key = f"{ticker}:{period}"
+    cached = _chart_cache.get(cache_key)
+    if cached and time_mod.time() - cached["ts"] < _CHART_CACHE_TTL:
+        return JSONResponse(cached["data"])
+
+    interval_map = {"1d": "5m", "5d": "30m", "1mo": "1d"}
+    interval = interval_map.get(period, "5m")
+    is_intraday = interval != "1d"
+
+    empty = {"candles": [], "ticker": ticker, "period": period, "is_intraday": is_intraday}
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
+    except Exception:
+        return JSONResponse(empty)
+
+    if df.empty:
+        return JSONResponse(empty)
+
+    # Flatten MultiIndex columns (newer yfinance versions)
+    if hasattr(df.columns, "levels"):
+        df.columns = df.columns.get_level_values(0)
+
+    candles = []
+    for ts, row in df.iterrows():
+        o = float(row.get("Open", float("nan")))
+        h = float(row.get("High", float("nan")))
+        l = float(row.get("Low", float("nan")))
+        c = float(row.get("Close", float("nan")))
+        if any(v != v for v in [o, h, l, c]):  # skip NaN rows
+            continue
+        t = int(ts.value // 10**9) if is_intraday else ts.strftime("%Y-%m-%d")
+        candles.append({"time": t, "open": round(o, 2), "high": round(h, 2),
+                         "low": round(l, 2), "close": round(c, 2)})
+
+    result = {"candles": candles, "ticker": ticker, "period": period, "is_intraday": is_intraday}
+    _chart_cache[cache_key] = {"ts": time_mod.time(), "data": result}
+    return JSONResponse(result)
+

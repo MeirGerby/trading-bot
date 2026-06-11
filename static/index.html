@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trading Bot Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f1117; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; font-size: 14px; padding: 20px; }
@@ -34,6 +35,23 @@
   .neutral { color: #64748b; }
   #refresh-time { color: #334155; font-size: 11px; margin-top: 20px; text-align: center; }
   .empty { color: #475569; font-size: 13px; text-align: center; padding: 20px 0; }
+
+  /* Chart controls */
+  .chart-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .chart-controls select {
+    background: #0f1117; color: #e2e8f0; border: 1px solid #2d3148;
+    border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+  }
+  .period-btn {
+    background: #0f1117; color: #64748b; border: 1px solid #2d3148;
+    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer;
+    transition: all .15s;
+  }
+  .period-btn.active { background: #2d3148; color: #e2e8f0; border-color: #4a5180; }
+  .period-btn:hover:not(.active) { border-color: #4a5180; color: #94a3b8; }
+  #chart-info { font-size: 12px; color: #64748b; margin-right: auto; }
+  #chart-container { direction: ltr; width: 100%; height: 360px; border-radius: 6px; overflow: hidden; }
+  #chart-loading { color: #475569; font-size: 13px; text-align: center; padding: 60px 0; }
 </style>
 </head>
 <body>
@@ -42,6 +60,28 @@
 <p class="subtitle" id="last-updated">טוען...</p>
 
 <div class="grid">
+
+  <!-- Chart -->
+  <div class="card full">
+    <h2>גרף שוק ההון</h2>
+    <div class="chart-controls">
+      <select id="ticker-select">
+        <option>AAPL</option><option>MSFT</option><option>NVDA</option>
+        <option>TSLA</option><option>AMZN</option><option>META</option>
+        <option>GOOGL</option><option>AMD</option><option>SMCI</option>
+        <option>PLTR</option><option>MSTR</option><option>COIN</option>
+        <option>HOOD</option><option>RIVN</option><option>LCID</option>
+        <option>SPY</option><option>QQQ</option><option>IWM</option>
+      </select>
+      <button class="period-btn active" data-period="1d">יומי</button>
+      <button class="period-btn" data-period="5d">שבועי</button>
+      <button class="period-btn" data-period="1mo">חודשי</button>
+      <span id="chart-info"></span>
+    </div>
+    <div id="chart-loading">טוען נתונים...</div>
+    <div id="chart-container"></div>
+  </div>
+
   <!-- Alerts -->
   <div class="card full">
     <h2>התראות אחרונות</h2>
@@ -64,11 +104,90 @@
 <div id="refresh-time"></div>
 
 <script>
+// ─── Chart ────────────────────────────────────────────────────────────────────
+let chart = null;
+let candleSeries = null;
+let currentTicker = 'AAPL';
+let currentPeriod = '1d';
+
+function initChart() {
+  const container = document.getElementById('chart-container');
+  chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 360,
+    layout: { background: { color: '#1e2130' }, textColor: '#94a3b8' },
+    grid: { vertLines: { color: '#252840' }, horzLines: { color: '#252840' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d3148' },
+    rightPriceScale: { borderColor: '#2d3148' },
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#4ade80', downColor: '#f87171',
+    borderUpColor: '#4ade80', borderDownColor: '#f87171',
+    wickUpColor: '#4ade80', wickDownColor: '#f87171',
+  });
+
+  window.addEventListener('resize', () => {
+    if (chart) chart.applyOptions({ width: container.clientWidth });
+  });
+}
+
+async function loadChart() {
+  const loading = document.getElementById('chart-loading');
+  const container = document.getElementById('chart-container');
+  loading.style.display = 'block';
+  container.style.display = 'none';
+  document.getElementById('chart-info').textContent = '';
+
+  try {
+    const res = await fetch(`/api/chart/${currentTicker}?period=${currentPeriod}`);
+    const data = await res.json();
+
+    if (!data.candles || !data.candles.length) {
+      loading.textContent = 'אין נתונים זמינים (שוק סגור או ticker לא תקין)';
+      return;
+    }
+
+    if (!chart) initChart();
+    candleSeries.setData(data.candles);
+    chart.timeScale().fitContent();
+
+    const last = data.candles[data.candles.length - 1];
+    const first = data.candles[0];
+    const change = ((last.close - first.open) / first.open * 100).toFixed(2);
+    const cls = change >= 0 ? 'up' : 'down';
+    const sign = change >= 0 ? '+' : '';
+    document.getElementById('chart-info').innerHTML =
+      `<strong>${currentTicker}</strong> &nbsp;$${last.close.toFixed(2)} &nbsp;<span class="${cls}">${sign}${change}%</span>`;
+
+    loading.style.display = 'none';
+    container.style.display = 'block';
+    if (chart) chart.applyOptions({ width: container.clientWidth });
+  } catch (e) {
+    loading.textContent = 'שגיאה בטעינת הנתונים';
+  }
+}
+
+document.getElementById('ticker-select').addEventListener('change', e => {
+  currentTicker = e.target.value;
+  loadChart();
+});
+
+document.querySelectorAll('.period-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPeriod = btn.dataset.period;
+    loadChart();
+  });
+});
+
+// ─── Existing sections ────────────────────────────────────────────────────────
 const SIGNAL_LABELS = { breakout: 'פריצה', momentum: 'מומנטום', options: 'אופציות' };
 
 function badge(sig) {
-  const label = SIGNAL_LABELS[sig] || sig;
-  return `<span class="badge b-${sig}">${label}</span>`;
+  return `<span class="badge b-${sig}">${SIGNAL_LABELS[sig] || sig}</span>`;
 }
 
 function fmt(ts) {
@@ -103,7 +222,6 @@ async function loadWeights() {
   const res = await fetch('/api/weights');
   const { weights } = await res.json();
   const el = document.getElementById('weights-container');
-
   const LABELS = {
     breakout_volume_ratio: 'נפח × ממוצע (פריצה)',
     breakout_pct_from_high: '% מ-52w High',
@@ -113,22 +231,15 @@ async function loadWeights() {
     options_iv_percentile_min: 'IV מינימום',
     min_score_to_alert: 'ניקוד מינימום להתראה',
   };
-
   let html = '';
   for (const [k, v] of Object.entries(weights)) {
-    const cur = Number(v.current);
-    const def = Number(v.default);
-    const diff = cur - def;
+    const cur = Number(v.current), def = Number(v.default), diff = cur - def;
     let deltaHtml = '';
     if (Math.abs(diff) > 0.0001) {
       const cls = diff > 0 ? 'up' : 'down';
-      const sign = diff > 0 ? '+' : '';
-      deltaHtml = `<span class="delta ${cls}">(${sign}${diff.toFixed(2)})</span>`;
+      deltaHtml = `<span class="delta ${cls}">(${diff > 0 ? '+' : ''}${diff.toFixed(2)})</span>`;
     }
-    html += `<div class="stat-row">
-      <span class="stat-label">${LABELS[k] || k}</span>
-      <span class="stat-val">${deltaHtml}${cur}</span>
-    </div>`;
+    html += `<div class="stat-row"><span class="stat-label">${LABELS[k] || k}</span><span class="stat-val">${deltaHtml}${cur}</span></div>`;
   }
   el.innerHTML = html || '<p class="empty">אין נתונים</p>';
 }
@@ -137,29 +248,23 @@ async function loadFeedback() {
   const res = await fetch('/api/feedback');
   const data = await res.json();
   const el = document.getElementById('feedback-container');
-
   const pct = data.total ? Math.round(data.positive / data.total * 100) : 0;
   let html = `<div class="stat-row"><span class="stat-label">סה"כ פידבק</span><span class="stat-val">${data.total}</span></div>`;
-  html += `<div class="stat-row"><span class="stat-label">חיובי / שלילי</span><span class="stat-val"><span class="up">${data.positive}</span> / <span class="down">${data.negative}</span> &nbsp;<span class="neutral">(${pct}%)</span></span></div>`;
-
+  html += `<div class="stat-row"><span class="stat-label">חיובי / שלילי</span><span class="stat-val"><span class="up">${data.positive}</span> / <span class="down">${data.negative}</span> <span class="neutral">(${pct}%)</span></span></div>`;
   if (Object.keys(data.by_signal || {}).length) {
     html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">לפי סוג סיגנל</div>`;
     for (const [sig, counts] of Object.entries(data.by_signal)) {
-      const total = counts.positive + counts.negative;
-      const p = total ? Math.round(counts.positive / total * 100) : 0;
-      html += `<div class="stat-row">${badge(sig)}<span class="stat-val neutral">${p}% חיובי (${total})</span></div>`;
+      const t = counts.positive + counts.negative;
+      html += `<div class="stat-row">${badge(sig)}<span class="stat-val neutral">${t ? Math.round(counts.positive/t*100) : 0}% חיובי (${t})</span></div>`;
     }
   }
-
   if (data.top_tickers && data.top_tickers.length) {
     html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">Top tickers</div>`;
     for (const t of data.top_tickers) {
-      const total = t.positive + t.negative;
-      const p = total ? Math.round(t.positive / total * 100) : 0;
-      html += `<div class="stat-row"><span class="stat-label">${t.ticker}</span><span class="stat-val neutral">${p}% (${total})</span></div>`;
+      const tot = t.positive + t.negative;
+      html += `<div class="stat-row"><span class="stat-label">${t.ticker}</span><span class="stat-val neutral">${tot ? Math.round(t.positive/tot*100) : 0}% (${tot})</span></div>`;
     }
   }
-
   el.innerHTML = html || '<p class="empty">אין פידבק עדיין</p>';
 }
 
@@ -170,6 +275,8 @@ async function refresh() {
   document.getElementById('refresh-time').textContent = `רענון אוטומטי כל 30 שניות`;
 }
 
+// Initial load
+loadChart();
 refresh();
 setInterval(refresh, 30000);
 </script>
