@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trading Bot Dashboard</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f1117; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; font-size: 14px; padding: 20px; }
@@ -51,7 +51,7 @@
   .period-btn:hover:not(.active) { border-color: #4a5180; color: #94a3b8; }
   #chart-info { font-size: 12px; color: #64748b; margin-right: auto; }
   #chart-container { direction: ltr; width: 100%; height: 360px; border-radius: 6px; overflow: hidden; }
-  #chart-loading { color: #475569; font-size: 13px; text-align: center; padding: 60px 0; }
+  #chart-loading { color: #475569; font-size: 13px; text-align: center; padding: 60px 0; display: none; }
 </style>
 </head>
 <body>
@@ -112,8 +112,9 @@ let currentPeriod = '1d';
 
 function initChart() {
   const container = document.getElementById('chart-container');
+  const w = container.offsetWidth || window.innerWidth - 80;
   chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
+    width: w,
     height: 360,
     layout: { background: { color: '#1e2130' }, textColor: '#94a3b8' },
     grid: { vertLines: { color: '#252840' }, horzLines: { color: '#252840' } },
@@ -121,35 +122,30 @@ function initChart() {
     timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d3148' },
     rightPriceScale: { borderColor: '#2d3148' },
   });
-
   candleSeries = chart.addCandlestickSeries({
     upColor: '#4ade80', downColor: '#f87171',
     borderUpColor: '#4ade80', borderDownColor: '#f87171',
     wickUpColor: '#4ade80', wickDownColor: '#f87171',
   });
-
   window.addEventListener('resize', () => {
-    if (chart) chart.applyOptions({ width: container.clientWidth });
+    chart.applyOptions({ width: container.offsetWidth });
   });
 }
 
 async function loadChart() {
   const loading = document.getElementById('chart-loading');
-  const container = document.getElementById('chart-container');
-  loading.style.display = 'block';
-  container.style.display = 'none';
-  document.getElementById('chart-info').textContent = '';
+  document.getElementById('chart-info').textContent = 'טוען...';
 
   try {
     const res = await fetch(`/api/chart/${currentTicker}?period=${currentPeriod}`);
     const data = await res.json();
 
     if (!data.candles || !data.candles.length) {
-      loading.textContent = 'אין נתונים זמינים (שוק סגור או ticker לא תקין)';
+      document.getElementById('chart-info').textContent = 'אין נתונים (שוק סגור?)';
+      candleSeries.setData([]);
       return;
     }
 
-    if (!chart) initChart();
     candleSeries.setData(data.candles);
     chart.timeScale().fitContent();
 
@@ -160,12 +156,8 @@ async function loadChart() {
     const sign = change >= 0 ? '+' : '';
     document.getElementById('chart-info').innerHTML =
       `<strong>${currentTicker}</strong> &nbsp;$${last.close.toFixed(2)} &nbsp;<span class="${cls}">${sign}${change}%</span>`;
-
-    loading.style.display = 'none';
-    container.style.display = 'block';
-    if (chart) chart.applyOptions({ width: container.clientWidth });
   } catch (e) {
-    loading.textContent = 'שגיאה בטעינת הנתונים';
+    document.getElementById('chart-info').textContent = 'שגיאה בטעינת הנתונים';
   }
 }
 
@@ -275,7 +267,8 @@ async function refresh() {
   document.getElementById('refresh-time').textContent = `רענון אוטומטי כל 30 שניות`;
 }
 
-// Initial load
+// Initial load — init chart immediately so container has correct dimensions
+initChart();
 loadChart();
 refresh();
 setInterval(refresh, 30000);
