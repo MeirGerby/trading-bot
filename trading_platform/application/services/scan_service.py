@@ -32,7 +32,12 @@ from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
 from trading_platform.application.services.portfolio_engine import PortfolioEngine
-from trading_platform.application.services.risk_engine import ExitEngine, RiskEngine
+from trading_platform.application.services.risk_engine import (
+    ExitEngine,
+    RiskEngine,
+    default_exit_engine,
+    default_risk_engine,
+)
 from trading_platform.application.services.self_critique_engine import (
     ScanSummary,
     SelfCritiqueEngine,
@@ -45,6 +50,7 @@ logger = logging.getLogger(__name__)
 SCAN_RESULTS_KEY = "scan_results"
 WEIGHTS_KEY = "weights"
 TRADE_LOG_KEY = "trade_log"
+RISK_OVERRIDES_KEY = "risk_overrides"   # written by IdeaEngine; read at scan time
 MAX_TRADE_LOG = 200
 
 
@@ -177,9 +183,28 @@ class ScanService:
         merged.update(self._memory.load(WEIGHTS_KEY, {}))
         return merged
 
+    def _resolve_runtime_params(
+        self,
+    ) -> tuple[PortfolioEngine, RiskEngine, ExitEngine | None]:
+        """Return (possibly fresh) engines reflecting any IdeaEngine risk overrides.
+
+        If the IdeaEngine wrote changes to RISK_OVERRIDES_KEY since the last
+        build, we reconstruct lightweight engine instances for this scan only.
+        The module-level instances (self._portfolio etc.) are kept as defaults.
+        """
+        overrides = self._memory.load(RISK_OVERRIDES_KEY, {})
+        if not overrides:
+            return self._portfolio, self._risk, self._exit_engine
+        merged = {**self._settings.risk_params, **overrides}
+        pe = PortfolioEngine(merged)
+        re = default_risk_engine(merged, pe)
+        ee = default_exit_engine(merged) if self._exit_engine is not None else None
+        return pe, re, ee
+
     def scan(self) -> ScanReport:
         started = datetime.now(timezone.utc)
         params = self.current_params()
+        portfolio_engine, risk_engine, exit_engine = self._resolve_runtime_params()
         portfolio = self._broker.get_portfolio()
         watchlist = self.active_watchlist()
         self._audit.record("scan_started", {"symbols": len(watchlist)})
@@ -233,9 +258,9 @@ class ScanService:
                 except Exception:
                     logger.exception("meta decision engine adjust failed for %s", symbol)
 
-            quantity = self._portfolio.propose_quantity(portfolio, price, rec.confidence, symbol)
+            quantity = portfolio_engine.propose_quantity(portfolio, price, rec.confidence, symbol)
             rec = replace(rec, proposed_quantity=quantity)
-            rec = self._risk.review(rec, portfolio)
+            rec = risk_engine.review(rec, portfolio)
             recommendations.append(rec)
 
             self._audit.record("recommendation", recommendation_to_dict(rec))
@@ -254,8 +279,8 @@ class ScanService:
                     logger.exception("auto-execute failed for %s", symbol)
 
         # Exit pass: evaluate stop-loss / take-profit / signal-decay for open positions
-        if self._auto_execute and self._exit_engine is not None:
-            self._exit_pass({r.instrument.symbol for r in recommendations})
+        if self._auto_execute and exit_engine is not None:
+            self._exit_pass({r.instrument.symbol for r in recommendations}, exit_engine)
 
         recommendations.sort(key=lambda r: (r.score, r.confidence), reverse=True)
         finished = datetime.now(timezone.utc)
@@ -370,7 +395,8 @@ class ScanService:
         store["trades"] = store["trades"][-MAX_TRADE_LOG:]
         self._memory.save(TRADE_LOG_KEY, store)
 
-    def _exit_pass(self, active_signal_symbols: set[str]) -> None:
+    def _exit_pass(self, active_signal_symbols: set[str],
+                   exit_engine: ExitEngine) -> None:
         """Evaluate open positions for stop-loss, take-profit, and signal-decay exits."""
         portfolio = self._broker.get_portfolio()
         if not portfolio.positions:
@@ -382,7 +408,7 @@ class ScanService:
             if p is not None:
                 current_prices[pos.instrument.symbol] = p
 
-        exits = self._exit_engine.check_exits(portfolio, current_prices, active_signal_symbols)
+        exits = exit_engine.check_exits(portfolio, current_prices, active_signal_symbols)
 
         for symbol, reason in exits:
             pos = next((p for p in portfolio.positions if p.instrument.symbol == symbol), None)

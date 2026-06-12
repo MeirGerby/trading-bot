@@ -24,13 +24,15 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 import feedback as fb
 from trading_platform.application.services import recommendation_to_dict
-from trading_platform.bootstrap import build_scan_service
+from trading_platform.bootstrap import build_idea_engine, build_scan_service
 from trading_platform.config import Settings
+from trading_platform.config.settings import DEFAULT_RISK_PARAMS, DEFAULT_STRATEGY_PARAMS
 
 logger = logging.getLogger(__name__)
 
 _settings = Settings.from_env()
 scan_service = build_scan_service()
+_idea_engine = build_idea_engine()
 
 # In-memory: last alert per ticker → signal_types (for feedback linkage)
 _last_alerts: dict[str, list[str]] = {}
@@ -94,6 +96,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/weights — הגדרות סיגנלים\n"
         "/feedback — היסטוריית פידבק\n"
         "/watchlist — רשימת מניות\n"
+        "/ideas — רעיונות AI Advisor אחרונים\n"
         "/good\\_TICKER | /bad\\_TICKER — פידבק על התראה",
         parse_mode="MarkdownV2",
     )
@@ -159,6 +162,55 @@ async def _handle_feedback(update: Update, positive: bool) -> None:
     )
 
 
+async def cmd_ideas(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the most recent AI Advisor ideas."""
+    ideas = _idea_engine.get_recent_ideas(5)
+    if not ideas:
+        await update.message.reply_text("💡 אין רעיונות עדיין — הסוכן ירוץ בשעות הקרובות\\.",
+                                        parse_mode="MarkdownV2")
+        return
+    lines = ["💡 *AI Advisor — רעיונות אחרונים:*\n"]
+    _priority_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    for idea in ideas:
+        icon = _priority_icon.get(idea.get("priority", "low"), "⚪")
+        lines.append(f"{icon} *{_esc(idea['title'])}*")
+        lines.append(_esc(idea["rationale"]))
+        lines.append("")
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
+
+
+async def scheduled_ideas(ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Daily AI Advisor cycle — runs ideas and sends Telegram digest."""
+    chat_id = _settings.telegram_chat_id
+    if not chat_id:
+        return
+    try:
+        s_params = dict(DEFAULT_STRATEGY_PARAMS)
+        s_params.update(scan_service.current_params())
+        r_params = dict(DEFAULT_RISK_PARAMS)
+        applied = await asyncio.to_thread(
+            _idea_engine.run_daily_cycle, s_params, r_params)
+    except Exception:
+        logger.exception("scheduled_ideas: idea engine failed")
+        return
+
+    if not applied:
+        return
+
+    from datetime import date
+    today = date.today().strftime("%d/%m")
+    _priority_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    lines = [f"💡 *AI Advisor — סיכום יומי \\({_esc(today)}\\)*\n",
+             _esc(f"יושמו {len(applied)} שיפורים אוטומטיים:"), ""]
+    for idea in applied[:5]:
+        icon = _priority_icon.get(idea.priority, "⚪")
+        lines.append(f"{icon} *\\[{_esc(idea.category)}\\]* {_esc(idea.title)}")
+        lines.append(f"  {_esc(idea.rationale)}")
+        lines.append("")
+    await ctx.bot.send_message(chat_id=chat_id, text="\n".join(lines),
+                               parse_mode="MarkdownV2")
+
+
 async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Called by the job queue — scans and pushes alerts to the configured chat."""
     chat_id = _settings.telegram_chat_id
@@ -193,6 +245,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("weights", cmd_weights))
     app.add_handler(CommandHandler("feedback", cmd_feedback_summary))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))
+    app.add_handler(CommandHandler("ideas", cmd_ideas))
 
     # /good_AAPL and /bad_AAPL — registered as prefix handlers via MessageHandler
     from telegram.ext import MessageHandler, filters
@@ -203,5 +256,8 @@ def build_app() -> Application:
     # Scheduled job — runs every SCAN_INTERVAL_MINUTES
     interval = _settings.scan_interval_minutes * 60
     app.job_queue.run_repeating(scheduled_scan, interval=interval, first=60)
+
+    # Daily AI Advisor cycle — first run 1 h after startup
+    app.job_queue.run_repeating(scheduled_ideas, interval=86400, first=3600)
 
     return app

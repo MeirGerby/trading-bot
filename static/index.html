@@ -46,7 +46,7 @@
   .tab-btn:hover:not(.active) { color: #94a3b8; }
 
   /* All views hidden initially */
-  #view-trading, #view-portfolio, #view-performance, #view-intelligence { display: none; }
+  #view-trading, #view-portfolio, #view-performance, #view-intelligence, #view-advisor { display: none; }
 
   /* Trading view */
   .status-bar { display: flex; align-items: center; gap: 16px; background: #1e2130;
@@ -178,6 +178,40 @@
     font-family: 'Consolas', monospace; display: none; }
   .reasoning-panel.open { display: block; }
 
+  /* AI Advisor */
+  #view-advisor { display: none; }
+  .advisor-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #1e2130; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 14px; }
+  .advisor-last-run { font-size: 12px; color: #475569; }
+  .run-ideas-btn { background: #1e3a5f; color: #60a5fa; border: 1px solid #2a4a7f;
+    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer; }
+  .run-ideas-btn:hover { background: #2a4a7f; }
+  .run-ideas-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .idea-card { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 14px; margin-bottom: 10px; }
+  .idea-card.priority-high  { border-right: 3px solid #f87171; }
+  .idea-card.priority-medium { border-right: 3px solid #fbbf24; }
+  .idea-card.priority-low  { border-right: 3px solid #4ade80; }
+  .idea-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .priority-badge { display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700; }
+  .pb-high   { background: #3a1a1a; color: #f87171; }
+  .pb-medium { background: #3a2e1a; color: #fbbf24; }
+  .pb-low    { background: #1a3a2a; color: #4ade80; }
+  .idea-category { font-size: 11px; color: #64748b; background: #161a27;
+    border: 1px solid #2d3148; border-radius: 4px; padding: 2px 7px; }
+  .idea-title { font-size: 14px; font-weight: 600; color: #f8fafc; }
+  .idea-rationale { font-size: 12px; color: #94a3b8; line-height: 1.6; margin-bottom: 8px; }
+  .idea-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .idea-action { background: #12141d; border: 1px solid #252840; border-radius: 4px;
+    padding: 4px 10px; font-size: 11px; font-family: monospace; color: #94a3b8; }
+  .idea-action .old-val { color: #f87171; }
+  .idea-action .arrow { color: #475569; margin: 0 4px; }
+  .idea-action .new-val { color: #4ade80; }
+  .idea-source-tag { font-size: 10px; color: #475569; background: #161a27;
+    border: 1px solid #252840; border-radius: 3px; padding: 1px 6px; }
+
   /* Global symbol search */
   .global-search { position: relative; margin-bottom: 16px; max-width: 520px; }
   .global-search input { width: 100%; background: #1e2130; color: #e2e8f0;
@@ -224,6 +258,7 @@
   <button class="tab-btn" onclick="switchTab('portfolio')">💼 פורטפוליו</button>
   <button class="tab-btn" onclick="switchTab('performance')">📈 ביצועים</button>
   <button class="tab-btn" onclick="switchTab('intelligence')">🧠 בינה</button>
+  <button class="tab-btn" onclick="switchTab('advisor')">💡 AI Advisor</button>
 </div>
 
 <!-- ──────────────────────── Live Trading ───────────────────────────────── -->
@@ -323,6 +358,16 @@
       <div id="audit-container"><p class="empty">טוען...</p></div>
     </div>
   </div>
+</div>
+
+<!-- ──────────────────────── AI Advisor ─────────────────────────────────── -->
+<div id="view-advisor">
+  <div class="advisor-toolbar">
+    <span class="advisor-last-run" id="advisor-last-run">טוען...</span>
+    <span id="advisor-running-indicator" style="display:none"><span class="spinning">⟳</span> מריץ מחזור...</span>
+    <button class="run-ideas-btn" id="run-ideas-btn" onclick="triggerAdvisor()">🔄 הרץ עכשיו</button>
+  </div>
+  <div id="advisor-container"><p class="empty">טוען רעיונות...</p></div>
 </div>
 
 <!-- ──────────────────────── Dashboard (default) ────────────────────────── -->
@@ -590,7 +635,7 @@ document.querySelectorAll('.period-btn').forEach(btn => {
 });
 
 // ─── Tab switching ────────────────────────────────────────────────────────────
-const VIEWS = ['dashboard', 'trading', 'screener', 'portfolio', 'performance', 'intelligence'];
+const VIEWS = ['dashboard', 'trading', 'screener', 'portfolio', 'performance', 'intelligence', 'advisor'];
 let tradingPollTimer = null, perfPollTimer = null, screenerPollTimer = null, portfolioPollTimer = null;
 
 function switchTab(name) {
@@ -621,6 +666,8 @@ function switchTab(name) {
     perfPollTimer = setInterval(loadPerformance, 30000);
   } else if (name === 'intelligence') {
     loadIntelligence();
+  } else if (name === 'advisor') {
+    loadAdvisor();
   }
 }
 
@@ -1085,6 +1132,86 @@ async function loadIntelligence() {
       auditEl.innerHTML = '<p class="empty">אין אירועים</p>';
     }
   } catch(e) {}
+}
+
+// ─── AI Advisor ───────────────────────────────────────────────────────────────
+const PRIORITY_ICON = { high: '🔴', medium: '🟡', low: '🟢' };
+const CATEGORY_LABELS = { strategy: 'אסטרטגיה', risk: 'סיכון', watchlist: 'רשימת מעקב', market_context: 'שוק' };
+const SOURCE_LABELS = {
+  performance_analysis: 'ניתוח ביצועים', market_data: 'נתוני שוק',
+  lessons: 'לקחים', critiques: 'ביקורת עצמית',
+  watchlist_health: 'בריאות רשימה', exit_quality: 'איכות יציאות'
+};
+
+async function loadAdvisor() {
+  try {
+    const res = await fetch('/api/ideas');
+    const data = await res.json();
+    const btn = document.getElementById('run-ideas-btn');
+    const runningEl = document.getElementById('advisor-running-indicator');
+    const lastRunEl = document.getElementById('advisor-last-run');
+
+    btn.disabled = data.running;
+    runningEl.style.display = data.running ? 'inline' : 'none';
+    lastRunEl.textContent = data.last_run
+      ? `סבב אחרון: ${fmtRelTime(data.last_run)}`
+      : 'טרם הורץ סבב';
+
+    const el = document.getElementById('advisor-container');
+    if (!data.ideas || !data.ideas.length) {
+      el.innerHTML = '<p class="empty">אין רעיונות עדיין — לחץ "הרץ עכשיו" להפעלת הסוכן ידנית, או המתן לסבב היומי האוטומטי</p>';
+      return;
+    }
+    el.innerHTML = data.ideas.map(idea => {
+      const pIcon = PRIORITY_ICON[idea.priority] || '⚪';
+      const pCls = `pb-${idea.priority}`;
+      const catLabel = CATEGORY_LABELS[idea.category] || idea.category;
+      const srcLabel = SOURCE_LABELS[idea.source] || idea.source;
+      const actionsHtml = (idea.actions || []).filter(a => a.action_type.startsWith('set_')).map(a =>
+        `<div class="idea-action">
+          ${escapeHtml(a.key)}:
+          <span class="old-val">${a.old_value}</span>
+          <span class="arrow">→</span>
+          <span class="new-val">${a.new_value}</span>
+        </div>`
+      ).join('');
+      const watchlistActionsHtml = (idea.actions || []).filter(a => a.action_type.endsWith('_watchlist')).map(a =>
+        `<div class="idea-action">
+          ${a.action_type === 'add_watchlist' ? '➕' : '➖'} ${escapeHtml(a.key)}
+        </div>`
+      ).join('');
+      const ts = idea.generated_at ? `<span class="time">${fmt(idea.generated_at)}</span>` : '';
+      return `<div class="idea-card priority-${idea.priority}">
+        <div class="idea-header">
+          <span class="priority-badge ${pCls}">${pIcon} ${idea.priority === 'high' ? 'גבוה' : idea.priority === 'medium' ? 'בינוני' : 'נמוך'}</span>
+          <span class="idea-category">${catLabel}</span>
+          <span class="idea-title">${escapeHtml(idea.title)}</span>
+          ${ts}
+        </div>
+        <div class="idea-rationale">${escapeHtml(idea.rationale)}</div>
+        <div class="idea-actions">${actionsHtml}${watchlistActionsHtml}</div>
+        <div style="margin-top:6px">
+          <span class="idea-source-tag">📎 ${srcLabel}</span>
+          ${idea.applied ? '<span class="idea-source-tag" style="color:#4ade80;border-color:#1a3a2a">✅ יושם</span>' : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+async function triggerAdvisor() {
+  document.getElementById('run-ideas-btn').disabled = true;
+  document.getElementById('advisor-running-indicator').style.display = 'inline';
+  await fetch('/api/ideas/run', { method: 'POST' });
+  // Poll until done
+  const poll = setInterval(async () => {
+    const res = await fetch('/api/ideas');
+    const data = await res.json();
+    if (!data.running) {
+      clearInterval(poll);
+      loadAdvisor();
+    }
+  }, 3000);
 }
 
 // ─── Dashboard sections ───────────────────────────────────────────────────────

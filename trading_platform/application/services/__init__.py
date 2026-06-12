@@ -1,5 +1,6 @@
 from trading_platform.application.services.decision_engine import DecisionEngine
 from trading_platform.application.services.fee_calculator import FeeCalculator
+from trading_platform.application.services.idea_engine import IdeaEngine
 from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
@@ -24,6 +25,7 @@ __all__ = [
     "CashReserveRule",
     "DecisionEngine",
     "ExitEngine",
+    "IdeaEngine",
     "FeeCalculator",
     "LearningEngine",
     "MaxExposureRule",

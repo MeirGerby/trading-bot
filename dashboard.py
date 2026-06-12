@@ -22,6 +22,7 @@ from trading_platform.application.services.performance_tracker import Performanc
 from trading_platform.application.services.screener_service import technical_snapshot
 from trading_platform.application.services.self_critique_engine import SelfCritiqueEngine
 from trading_platform.bootstrap import (
+    build_idea_engine,
     build_scan_service,
     build_screener_service,
     build_symbol_repository,
@@ -53,6 +54,10 @@ _screener_service = build_screener_service()
 _screener_cache: dict = {"rows": [], "ts": 0.0, "running": False}
 _SCREENER_INTERVAL = 600  # fundamentals are slow + heavily cached; 10 min is plenty
 
+_idea_engine = build_idea_engine()
+_idea_cache: dict = {"ideas": [], "ts": 0.0, "running": False}
+_IDEA_INTERVAL = 86400  # once per day
+
 
 def _run_screener() -> None:
     _screener_cache["running"] = True
@@ -76,6 +81,33 @@ def _screener_loop() -> None:
 threading.Thread(target=_screener_loop, daemon=True).start()
 
 
+def _run_idea_cycle() -> None:
+    _idea_cache["running"] = True
+    try:
+        from trading_platform.config.settings import DEFAULT_RISK_PARAMS, DEFAULT_STRATEGY_PARAMS
+        s_params = dict(DEFAULT_STRATEGY_PARAMS)
+        s_params.update(_scan_service.current_params())
+        r_params = dict(DEFAULT_RISK_PARAMS)
+        ideas = _idea_engine.run_daily_cycle(s_params, r_params)
+        _idea_cache["ideas"] = _idea_engine.get_recent_ideas(30)
+        _idea_cache["ts"] = time_mod.time()
+        logger.info("idea cycle complete: %d ideas applied", len(ideas))
+    except Exception:
+        logger.exception("idea engine cycle failed")
+    finally:
+        _idea_cache["running"] = False
+
+
+def _idea_loop() -> None:
+    time_mod.sleep(3600)  # first run 1h after startup
+    while True:
+        _run_idea_cycle()
+        time_mod.sleep(_IDEA_INTERVAL)
+
+
+threading.Thread(target=_idea_loop, daemon=True).start()
+
+
 def _load_persisted_results() -> None:
     """Seed the cache from the last persisted scan so restarts aren't empty."""
     stored = _scan_service.last_scan_results()
@@ -88,6 +120,7 @@ def _load_persisted_results() -> None:
 
 
 _load_persisted_results()
+_idea_cache["ideas"] = _idea_engine.get_recent_ideas(30)
 
 
 def _run_scan() -> None:
@@ -421,6 +454,23 @@ def refresh_screener():
     if _screener_cache["running"]:
         return JSONResponse({"status": "already_running"})
     threading.Thread(target=_run_screener, daemon=True).start()
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/api/ideas")
+def get_ideas():
+    return JSONResponse({
+        "ideas": _idea_cache.get("ideas", []),
+        "last_run": _idea_cache.get("ts", 0.0),
+        "running": _idea_cache.get("running", False),
+    })
+
+
+@app.post("/api/ideas/run")
+def run_ideas():
+    if _idea_cache.get("running"):
+        return JSONResponse({"status": "already_running"})
+    threading.Thread(target=_run_idea_cycle, daemon=True).start()
     return JSONResponse({"status": "started"})
 
 

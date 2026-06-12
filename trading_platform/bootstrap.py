@@ -9,6 +9,7 @@ from pathlib import Path
 from trading_platform.application.services import (
     DecisionEngine,
     FeeCalculator,
+    IdeaEngine,
     LearningEngine,
     MetaDecisionEngine,
     PerformanceTracker,
@@ -95,6 +96,24 @@ def build_scan_service(settings: Settings | None = None,
         auto_execute=settings.auto_execute_paper,  # paper broker only (ADR-5)
         symbol_repository=JsonSymbolRepository(memory, market_data, settings.watchlist),
         exit_engine=default_exit_engine(settings.risk_params),
+    )
+
+
+def build_idea_engine(settings: Settings | None = None,
+                      base_dir: str | Path | None = None) -> IdeaEngine:
+    settings = settings or Settings.from_env()
+    data_dir = _data_dir(settings, base_dir)
+    memory = JsonMemoryStore(data_dir)
+    market_data = get_market_data()
+    symbol_repo = JsonSymbolRepository(memory, market_data, settings.watchlist)
+    tracker = PerformanceTracker(memory, market_data)
+    return IdeaEngine(
+        memory=memory,
+        market_data=market_data,
+        symbol_repository=symbol_repo,
+        performance_tracker=tracker,
+        learning_engine=LearningEngine(memory),
+        self_critique_engine=SelfCritiqueEngine(memory),
     )
 
 
