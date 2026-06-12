@@ -1,7 +1,12 @@
 """Application ports — structural interfaces implemented by infrastructure.
 
-Implementations live in trading_platform.infrastructure (Phases 3–8).
+Implementations live in trading_platform.infrastructure.
 Test doubles can satisfy these Protocols without inheritance.
+
+ADR-6: strategies receive their data dependencies via constructor, not via
+evaluate() arguments — different strategies need different ports (bars vs
+option chains), and constructor injection keeps the Strategy interface
+uniform for the ScanService.
 """
 from typing import Protocol, runtime_checkable
 
@@ -9,6 +14,9 @@ from trading_platform.domain import (
     Bar,
     FeedbackEvent,
     Instrument,
+    OptionContract,
+    Order,
+    OrderSide,
     PortfolioState,
     Recommendation,
     RiskCheckResult,
@@ -18,28 +26,28 @@ from trading_platform.domain import (
 
 @runtime_checkable
 class MarketDataPort(Protocol):
-    """Phase 3: yfinance adapter; later possibly broker feeds."""
-
     def get_daily_bars(self, symbol: str, lookback_days: int) -> list[Bar]: ...
 
     def get_last_price(self, symbol: str) -> float | None: ...
 
 
 @runtime_checkable
+class OptionsDataPort(Protocol):
+    def get_option_contracts(self, symbol: str, max_expirations: int = 2) -> list[OptionContract]: ...
+
+
+@runtime_checkable
 class Strategy(Protocol):
-    """Phase 5: breakout / momentum / options-flow implementations."""
+    """Data dependencies are injected at construction (ADR-6)."""
 
     @property
     def name(self) -> str: ...
 
-    def evaluate(self, instrument: Instrument, market_data: MarketDataPort,
-                 params: dict[str, float]) -> Signal | None: ...
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None: ...
 
 
 @runtime_checkable
 class RiskRule(Protocol):
-    """Phase 6: position sizing, exposure, volatility, liquidity, drawdown."""
-
     @property
     def name(self) -> str: ...
 
@@ -49,8 +57,6 @@ class RiskRule(Protocol):
 
 @runtime_checkable
 class MemoryStore(Protocol):
-    """Phase 4: persistent project memory (weights, feedback, knowledge)."""
-
     def load(self, key: str, default: dict) -> dict: ...
 
     def save(self, key: str, value: dict) -> None: ...
@@ -59,7 +65,20 @@ class MemoryStore(Protocol):
 
 
 @runtime_checkable
-class Notifier(Protocol):
-    """Telegram today; extensible to email/webhooks."""
+class BrokerPort(Protocol):
+    """Paper trading only until live trading is explicitly authorized."""
 
+    def get_portfolio(self) -> PortfolioState: ...
+
+    def submit_market_order(self, symbol: str, side: OrderSide,
+                            quantity: float, price: float) -> Order: ...
+
+
+@runtime_checkable
+class AuditLogPort(Protocol):
+    def record(self, event: str, payload: dict) -> None: ...
+
+
+@runtime_checkable
+class Notifier(Protocol):
     def send(self, message: str) -> None: ...

@@ -18,6 +18,14 @@ DEFAULT_STRATEGY_PARAMS: dict[str, float] = {
     "min_score_to_alert": 2,
 }
 
+DEFAULT_RISK_PARAMS: dict[str, float] = {
+    "base_allocation_pct": 0.05,       # target position = equity * pct * confidence
+    "max_position_pct": 0.10,          # single position cap vs equity
+    "max_total_exposure_pct": 0.80,    # total invested cap vs equity
+    "min_cash_reserve_pct": 0.10,      # cash floor after any trade
+    "paper_starting_cash": 100_000.0,
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -26,6 +34,7 @@ class Settings:
     watchlist: tuple[str, ...] = DEFAULT_WATCHLIST
     scan_interval_minutes: int = 15
     strategy_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_STRATEGY_PARAMS))
+    risk_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_RISK_PARAMS))
     data_dir: str = "data"
 
     def __post_init__(self) -> None:

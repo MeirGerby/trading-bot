@@ -5,11 +5,10 @@ normalized strength in [0, 1]:
 - at exactly the configured threshold → ~0.5
 - well beyond it → approaches 1.0
 
-The options-flow strategy is NOT ported yet: it needs option-chain data,
-which MarketDataPort does not expose. Tracked in docs/PROJECT_STATUS.md.
+Data dependencies are constructor-injected (ADR-6).
 """
 from trading_platform.application.indicators import rsi, sma
-from trading_platform.application.ports import MarketDataPort
+from trading_platform.application.ports import MarketDataPort, OptionsDataPort
 from trading_platform.domain import Instrument, Signal, SignalType
 
 
@@ -22,9 +21,11 @@ class BreakoutStrategy:
 
     name = "breakout"
 
-    def evaluate(self, instrument: Instrument, market_data: MarketDataPort,
-                 params: dict[str, float]) -> Signal | None:
-        bars = market_data.get_daily_bars(instrument.symbol, 252)
+    def __init__(self, market_data: MarketDataPort):
+        self._market_data = market_data
+
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None:
+        bars = self._market_data.get_daily_bars(instrument.symbol, 252)
         if len(bars) < 21:
             return None
 
@@ -62,10 +63,12 @@ class MomentumStrategy:
 
     name = "momentum"
 
-    def evaluate(self, instrument: Instrument, market_data: MarketDataPort,
-                 params: dict[str, float]) -> Signal | None:
+    def __init__(self, market_data: MarketDataPort):
+        self._market_data = market_data
+
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None:
         ma_period = int(params["momentum_price_above_ma"])
-        bars = market_data.get_daily_bars(instrument.symbol, max(ma_period + 1, 30))
+        bars = self._market_data.get_daily_bars(instrument.symbol, max(ma_period + 1, 30))
         closes = [b.close for b in bars]
 
         current_ma = sma(closes, ma_period)
@@ -89,4 +92,37 @@ class MomentumStrategy:
         )
 
 
-ALL_STRATEGIES = (BreakoutStrategy(), MomentumStrategy())
+class OptionsFlowStrategy:
+    """Unusual options activity: volume far above open interest."""
+
+    name = "options"
+
+    MIN_OPEN_INTEREST = 100  # ignore illiquid contracts, as the legacy scanner did
+
+    def __init__(self, options_data: OptionsDataPort):
+        self._options_data = options_data
+
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None:
+        contracts = self._options_data.get_option_contracts(instrument.symbol, max_expirations=2)
+        liquid = [c for c in contracts
+                  if c.open_interest > self.MIN_OPEN_INTEREST and c.volume > 0]
+        if not liquid:
+            return None
+
+        best = max(liquid, key=lambda c: c.vol_oi_ratio)
+        thr = params["options_vol_oi_ratio"]
+        if best.vol_oi_ratio < thr:
+            return None
+
+        return Signal(
+            instrument=instrument,
+            signal_type=SignalType.OPTIONS_FLOW,
+            strength=_clamp(best.vol_oi_ratio / (thr * 2)),
+            details={
+                "type": best.option_type.value.upper(),
+                "strike": f"{best.strike:.2f}",
+                "expiration": best.expiration,
+                "vol_oi": f"{best.vol_oi_ratio:.1f}x",
+                "IV": f"{best.implied_volatility * 100:.0f}%",
+            },
+        )

@@ -3,9 +3,11 @@ Dashboard API — exposes bot activity data as JSON endpoints
 and serves the static HTML dashboard.
 """
 import json
+import logging
 import os
 import threading
 import time as time_mod
+from datetime import datetime
 from pathlib import Path
 
 import yfinance as yf
@@ -13,8 +15,10 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
 import config
-import feedback as fb
-from scanner import scan_all
+from trading_platform.application.services import recommendation_to_dict
+from trading_platform.bootstrap import build_scan_service
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -24,23 +28,33 @@ STATIC_DIR = Path(__file__).parent / "static"
 _chart_cache: dict = {}
 _CHART_CACHE_TTL = 300  # 5 minutes
 
+_scan_service = build_scan_service()
 _scan_cache: dict = {"signals": [], "ts": 0.0, "running": False, "next_scan": 0.0}
 _SCAN_INTERVAL = 300  # 5 minutes
+
+
+def _load_persisted_results() -> None:
+    """Seed the cache from the last persisted scan so restarts aren't empty."""
+    stored = _scan_service.last_scan_results()
+    if stored.get("recommendations"):
+        _scan_cache["signals"] = stored["recommendations"]
+        try:
+            _scan_cache["ts"] = datetime.fromisoformat(stored["timestamp"]).timestamp()
+        except (ValueError, KeyError):
+            pass
+
+
+_load_persisted_results()
 
 
 def _run_scan() -> None:
     _scan_cache["running"] = True
     try:
-        weights = fb.load_weights(config.DEFAULT_WEIGHTS)
-        signals = scan_all(config.WATCHLIST, weights)
-        _scan_cache["signals"] = [
-            {"ticker": s.ticker, "score": s.score,
-             "signal_types": s.signal_types, "price": s.price, "details": s.details}
-            for s in signals
-        ]
+        report = _scan_service.scan()
+        _scan_cache["signals"] = [recommendation_to_dict(r) for r in report.recommendations]
         _scan_cache["ts"] = time_mod.time()
     except Exception:
-        pass
+        logger.exception("scan failed")
     finally:
         _scan_cache["running"] = False
     _scan_cache["next_scan"] = time_mod.time() + _SCAN_INTERVAL

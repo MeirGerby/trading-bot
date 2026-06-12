@@ -10,21 +10,51 @@ migrates into the `trading_platform` package, layer by layer.
 ## Layers
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Interfaces        Telegram bot · FastAPI dashboard · CLI │
-├─────────────────────────────────────────────────────────┤
-│ Application       Ports (Protocols) · Use-case services  │
-│                   ScanService · FeedbackService          │
-├─────────────────────────────────────────────────────────┤
-│ Domain            Pure models, no I/O:                   │
-│                   Instrument · Bar · Signal              │
-│                   Recommendation · RiskCheckResult       │
-│                   PortfolioState · FeedbackEvent         │
-├─────────────────────────────────────────────────────────┤
-│ Infrastructure    yfinance adapter · JSON memory store   │
-│                   Telegram notifier · (later: brokers)   │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Interfaces        bot.py (Telegram) · dashboard.py (FastAPI)  │
+│                   — thin adapters over ScanService            │
+├──────────────────────────────────────────────────────────────┤
+│ Application       Ports (Protocols) · Strategies · Indicators │
+│                   ScanService · DecisionEngine · RiskEngine   │
+│                   PortfolioEngine                             │
+├──────────────────────────────────────────────────────────────┤
+│ Domain            Pure models, no I/O:                        │
+│                   Instrument · Bar · Signal · Recommendation  │
+│                   RiskCheckResult · PortfolioState · Order    │
+│                   OptionContract · FeedbackEvent              │
+├──────────────────────────────────────────────────────────────┤
+│ Infrastructure    YFinanceMarketData · YFinanceOptionsData    │
+│                   JsonMemoryStore · PaperBroker               │
+│                   JsonlAuditLog                               │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+## Scan pipeline (ScanService.scan)
+
+```
+settings + learned weights (memory)
+        │
+        ▼
+portfolio state (broker) ──────────────┐
+        │                              │
+per symbol: Breakout · Momentum ·      │
+            OptionsFlow strategies     │
+        │ signals                      │
+        ▼                              │
+min_score filter → DecisionEngine      │
+  (confidence = 0.6·strength +         │
+   0.4·feedback prior)                 │
+        │                              ▼
+        ▼                    PortfolioEngine sizing
+RiskEngine (position size ·  ◄─────────┘
+  exposure · cash reserve)
+        │
+        ▼
+persist scan_results (memory) + audit JSONL
+```
+
+Execution is separate from scanning: `ScanService.execute(rec)` places a
+paper order only for an approved recommendation.
 
 **Dependency rule:** arrows point inward only. Domain imports nothing from
 other layers. Application depends on Domain. Infrastructure implements
@@ -52,11 +82,14 @@ docs/            this file + ROADMAP, PROJECT_STATUS, KNOWLEDGE_BASE
 | 3 | Plain dataclasses over Pydantic for domain | Domain stays dependency-free; Pydantic reserved for API edges |
 | 4 | JSON file persistence retained for now | Single-user scale; swap behind `MemoryStore` port when needed |
 | 5 | Broker execution will default to **paper trading**; live-money integration requires explicit owner approval | Risk containment |
+| 6 | Strategies receive data ports via constructor, not evaluate() args | Different strategies need different data (bars vs option chains); keeps Strategy interface uniform for ScanService |
+| 7 | Scanning and execution are separate operations | A scan must never trade implicitly; execute() acts only on approved recommendations |
+| 8 | Audit log is append-only JSONL with flock | Greppable, tail-able, concurrent-append-safe across containers |
 
-## Migration plan
+## Migration status
 
-1. Domain models + ports (this phase)
-2. Move scanner strategies behind `Strategy` port → `infrastructure/strategies/`
-3. Move feedback/weights behind `MemoryStore` port
-4. `ScanService` orchestrates; `bot.py` and `dashboard.py` become thin adapters
-5. Risk engine consumes `Recommendation` before any notification
+1. ✅ Domain models + ports
+2. ✅ Strategies behind the `Strategy` port (`application/strategies.py`); legacy `scanner.py` deleted
+3. ✅ Feedback/weights behind `MemoryStore` (`feedback.py` is a thin facade)
+4. ✅ `ScanService` orchestrates; `bot.py` and `dashboard.py` are thin adapters
+5. ✅ Risk engine reviews every `Recommendation` before it is surfaced

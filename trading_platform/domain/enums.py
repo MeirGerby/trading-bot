@@ -16,3 +16,18 @@ class AssetClass(str, Enum):
     EQUITY = "equity"
     ETF = "etf"
     OPTION = "option"
+
+
+class OptionType(str, Enum):
+    CALL = "call"
+    PUT = "put"
+
+
+class OrderSide(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class OrderStatus(str, Enum):
+    FILLED = "filled"
+    REJECTED = "rejected"

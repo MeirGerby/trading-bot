@@ -1,47 +1,51 @@
 # Project Status
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-12 (ScanService session)_
 
 ## 📋 Current sprint
 
-- Phases 4–5 delivered: JsonMemoryStore (atomic writes + flock), feedback.py migrated onto it,
-  indicators (Wilder RSI, SMA), Breakout + Momentum strategies behind the Strategy port
-- Next sprint: ScanService orchestration + options-data port
+- Delivered: ScanService orchestration, DecisionEngine, RiskEngine, PortfolioEngine,
+  PaperBroker, JSONL audit log, options-flow strategy; bot.py + dashboard.py rewired
+  as thin adapters; legacy scanner.py deleted
+- Next sprint: CI workflow + portfolio/audit dashboard views
 
 ## ✅ Completed
 
-- Cloud deployment (Docker + docker-compose on Oracle Cloud VPS; Railway config kept)
-- Web dashboard: alerts table, weights, feedback stats
-- Real-time candlestick charts (lightweight-charts, 1d/5d/1mo)
-- Daily-trading live view: background scans every 5 min, 5-second UI polling, manual rescan
-- Phase 1: architecture docs, roadmap, knowledge base, project status tracking
-- Phase 2: `trading_platform` package — domain models with validation, Protocol ports, env-driven settings, unit tests
-- Phase 3: `YFinanceMarketData` adapter — TTL cache, MultiIndex flattening, NaN-row skipping, injectable downloader (9 tests)
-- Phase 4: `JsonMemoryStore` — atomic temp-file writes, flock serialization across bot/dashboard containers,
-  legacy-compatible feedback format; `feedback.py` migrated with regression tests
-- Phase 5 (partial): pure-python indicators (proper Wilder RSI replacing legacy approximation, SMA);
-  `BreakoutStrategy` + `MomentumStrategy` with normalized strength scores
+- Cloud deployment (Docker on Oracle Cloud VPS), dashboard with charts, daily-trading live view
+- Phases 1–4: docs, domain models, ports, settings, market-data adapter, memory store
+- Phase 5: Breakout / Momentum / OptionsFlow strategies (constructor-injected ports, ADR-6)
+- Phase 6: RiskEngine — max position size, max exposure, cash reserve rules with audit reasons
+- Phase 7: DecisionEngine — confidence = 0.6·signal strength + 0.4·feedback prior, rationale text
+- Phase 8: PaperBroker — instant fills, weighted-avg positions, persisted via lock-protected store
+- ScanService pipeline (config → memory → portfolio → strategies → decision → risk → persist → audit)
+- bot.py / dashboard.py thin adapters; scan results persist across restarts (was a backlog item)
+- Performance: one bars download per ticker per scan (legacy downloaded twice); bot scans no
+  longer block the Telegram event loop (asyncio.to_thread)
+- 113 tests passing, including a full-pipeline integration test (real engines + store + broker
+  + audit, fake market data)
 
 ## 📝 Backlog (priority order)
 
-1. `OptionsDataPort` + port the options-flow check (completes Phase 5)
-2. `ScanService` orchestration; make `bot.py` and `dashboard.py` thin adapters
-3. Phase 6: risk rule pipeline
-4. Persist dashboard scan cache to disk (survive restarts)
-5. CI workflow (pytest on push)
+1. CI workflow — pytest on every push
+2. Dashboard: paper-portfolio view + audit-trail view; "execute (paper)" button per recommendation
+3. Risk rules: volatility, liquidity, drawdown, stop-loss/take-profit levels
+4. Confidence-weighted alert ordering in Telegram (currently score-then-confidence)
+5. Batched yfinance downloads for the whole watchlist in one request
+6. Knowledge-base auto-update from feedback patterns
 
 ## ⚠️ Technical debt
 
-- `scanner.py` still duplicates strategy logic now in `trading_platform.application.strategies` — converges when ScanService lands and bot.py switches over
-- New strategies use proper Wilder RSI; legacy scanner uses an approximation — RSI values will shift slightly at switchover (document for the owner)
-- `dashboard.py` background-scan thread shares no lock with request handlers (GIL-safe for current dict swaps, but fragile)
-- `options_iv_percentile_min` weight exists but is unused by scanner logic
-- No CI; tests run locally only
-- Scan results stored only in memory — lost on container restart
+- bot and dashboard containers scan independently (15-min and 5-min cadences) — duplicated
+  work; consider a single scanner process publishing through the shared store
+- `config.py` and `Settings` coexist; legacy modules still read config.py
+- `options_iv_percentile_min` param still unused (kept for weight-format compatibility)
+- Telegram alert formatting changed slightly (confidence line added, decimal formatting);
+  visually verify first production alert
+- RSI is now proper Wilder smoothing — values differ slightly from the legacy approximation
 
 ## 🚨 Risks
 
-- **yfinance reliability:** unofficial API, rate limits, breaking changes — mitigated by adapter isolation (Phase 3)
-- **Single-file JSON persistence:** no concurrent-write safety between bot and dashboard containers sharing `data/` volume
-- **Free-tier VPS:** Oracle can reclaim Always-Free instances; document re-deploy procedure
-- **Future live trading:** financial risk — gated behind explicit owner approval, paper-first
+- yfinance reliability (unofficial API) — isolated in adapters; failures degrade to empty results
+- Free-tier VPS reclaim risk — redeploy procedure documented in README
+- Live trading remains gated: PaperBroker only; live-money integration requires explicit owner
+  approval (ADR-5, enforced in ScanService.execute being broker-agnostic but wired paper-only)

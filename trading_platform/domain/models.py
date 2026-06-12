@@ -2,7 +2,14 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from trading_platform.domain.enums import AssetClass, Direction, SignalType
+from trading_platform.domain.enums import (
+    AssetClass,
+    Direction,
+    OptionType,
+    OrderSide,
+    OrderStatus,
+    SignalType,
+)
 
 
 def _utcnow() -> datetime:
@@ -67,6 +74,7 @@ class Recommendation:
     price: float
     confidence: float  # 0.0–1.0, blends signal strengths and learned feedback
     rationale: str
+    proposed_quantity: float = 0.0  # sized by PortfolioEngine; 0 = informational only
     risk_checks: tuple[RiskCheckResult, ...] = ()
     created_at: datetime = field(default_factory=_utcnow)
 
@@ -77,6 +85,8 @@ class Recommendation:
             raise ValueError(f"confidence must be in [0, 1], got {self.confidence}")
         if self.price <= 0:
             raise ValueError(f"price must be positive, got {self.price}")
+        if self.proposed_quantity < 0:
+            raise ValueError("proposed_quantity must be >= 0")
 
     @property
     def score(self) -> int:
@@ -116,3 +126,38 @@ class FeedbackEvent:
     positive: bool
     timestamp: datetime = field(default_factory=_utcnow)
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class OptionContract:
+    """One row of an option chain, as needed by the options-flow strategy."""
+    underlying: str
+    option_type: OptionType
+    strike: float
+    expiration: str  # ISO date string, as provided by data vendors
+    volume: float
+    open_interest: float
+    implied_volatility: float = 0.0
+
+    @property
+    def vol_oi_ratio(self) -> float:
+        return self.volume / self.open_interest if self.open_interest > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class Order:
+    """A broker order. Paper trading only until live trading is authorized."""
+    id: str
+    symbol: str
+    side: OrderSide
+    quantity: float
+    price: float
+    status: OrderStatus
+    reason: str = ""
+    created_at: datetime = field(default_factory=_utcnow)
+
+    def __post_init__(self) -> None:
+        if self.quantity <= 0:
+            raise ValueError("quantity must be positive")
+        if self.price <= 0:
+            raise ValueError("price must be positive")

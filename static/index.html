@@ -286,6 +286,9 @@ async function loadRecommendations() {
       const detailLines = Object.entries(s.details || {})
         .map(([k, v]) => `<span style="color:#94a3b8">${k}:</span> ${v}`)
         .join('<br>');
+      const confLine = s.confidence !== undefined
+        ? `<div style="font-size:12px;color:#94a3b8">ביטחון: <strong>${Math.round(s.confidence * 100)}%</strong>${s.approved === false ? ' <span class="down">⚠️ נדחה בבדיקות סיכון</span>' : ''}</div>`
+        : '';
       return `<div class="signal-card score-${s.score}">
         <div class="card-header">
           <span class="card-ticker">${s.ticker}</span>
@@ -293,6 +296,7 @@ async function loadRecommendations() {
         </div>
         <div>${badges}</div>
         <div class="card-price">$${Number(s.price).toFixed(2)}</div>
+        ${confLine}
         <div class="card-details">${detailLines}</div>
       </div>`;
     }).join('');

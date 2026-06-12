@@ -8,12 +8,12 @@
 | 2 | Core domain models, ports, configuration | ✅ Done |
 | 3 | Market data layer — yfinance adapter behind `MarketDataPort`, caching, rate-limit handling | ✅ Done |
 | 4 | Memory layer — `MemoryStore` port wrapping JSON persistence (weights, feedback, alerts, knowledge base) | ✅ Done |
-| 5 | Strategy engine — migrate breakout/momentum/options into pluggable `Strategy` implementations; add registry | 🔶 Mostly done (options-flow pending an options-data port) |
-| 6 | Risk engine — position sizing, exposure, volatility, liquidity, stop-loss/take-profit rule pipeline | Planned |
-| 7 | Decision engine — combine signals + risk + learned preferences into scored `Recommendation` with rationale | Planned |
-| 8 | Broker abstraction — `BrokerPort` with **paper-trading default**; live trading only with explicit owner approval | Planned |
-| 9 | API & dashboard — migrate FastAPI dashboard onto services; recommendations with full reasoning | Planned |
-| 10 | Hardening — test coverage, performance, docs, CI | Planned |
+| 5 | Strategy engine — breakout/momentum/options as pluggable `Strategy` implementations | ✅ Done |
+| 6 | Risk engine — position sizing, exposure, cash-reserve rule pipeline (volatility/liquidity/stop-loss rules pending) | ✅ Core done |
+| 7 | Decision engine — signals + learned feedback priors → scored `Recommendation` with rationale | ✅ Done |
+| 8 | Broker abstraction — `BrokerPort` + `PaperBroker` (paper only; live trading requires explicit owner approval) | ✅ Done |
+| 9 | API & dashboard — bot.py and dashboard.py are thin adapters over ScanService; audit log JSONL | ✅ Core done (audit/portfolio UI pending) |
+| 10 | Hardening — test coverage, performance, docs, CI | ⏳ In progress (113 tests; CI pending) |
 
 ## Existing production features (must keep working through migration)
 
