@@ -4,6 +4,7 @@ and serves the static HTML dashboard.
 """
 import json
 import os
+import threading
 import time as time_mod
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
 import config
+import feedback as fb
+from scanner import scan_all
 
 app = FastAPI()
 
@@ -20,6 +23,37 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 _chart_cache: dict = {}
 _CHART_CACHE_TTL = 300  # 5 minutes
+
+_scan_cache: dict = {"signals": [], "ts": 0.0, "running": False, "next_scan": 0.0}
+_SCAN_INTERVAL = 300  # 5 minutes
+
+
+def _run_scan() -> None:
+    _scan_cache["running"] = True
+    try:
+        weights = fb.load_weights(config.DEFAULT_WEIGHTS)
+        signals = scan_all(config.WATCHLIST, weights)
+        _scan_cache["signals"] = [
+            {"ticker": s.ticker, "score": s.score,
+             "signal_types": s.signal_types, "price": s.price, "details": s.details}
+            for s in signals
+        ]
+        _scan_cache["ts"] = time_mod.time()
+    except Exception:
+        pass
+    finally:
+        _scan_cache["running"] = False
+    _scan_cache["next_scan"] = time_mod.time() + _SCAN_INTERVAL
+
+
+def _scan_loop() -> None:
+    time_mod.sleep(3)
+    while True:
+        _run_scan()
+        time_mod.sleep(_SCAN_INTERVAL)
+
+
+threading.Thread(target=_scan_loop, daemon=True).start()
 
 
 def _read_json(path: Path, default):
@@ -126,4 +160,22 @@ def get_chart(ticker: str, period: str = "1d"):
     result = {"candles": candles, "ticker": ticker, "period": period, "is_intraday": is_intraday}
     _chart_cache[cache_key] = {"ts": time_mod.time(), "data": result}
     return JSONResponse(result)
+
+
+@app.get("/api/recommendations")
+def get_recommendations():
+    return JSONResponse({
+        "signals": _scan_cache["signals"],
+        "last_scan": _scan_cache["ts"],
+        "running": _scan_cache["running"],
+        "next_scan": _scan_cache["next_scan"],
+    })
+
+
+@app.post("/api/scan")
+def trigger_scan():
+    if _scan_cache["running"]:
+        return JSONResponse({"status": "already_running"})
+    threading.Thread(target=_run_scan, daemon=True).start()
+    return JSONResponse({"status": "started"})
 

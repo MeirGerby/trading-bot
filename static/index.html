@@ -36,6 +36,35 @@
   #refresh-time { color: #334155; font-size: 11px; margin-top: 20px; text-align: center; }
   .empty { color: #475569; font-size: 13px; text-align: center; padding: 20px 0; }
 
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab-btn { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; color: #64748b;
+    padding: 8px 20px; font-size: 14px; cursor: pointer; transition: all .15s; }
+  .tab-btn.active { background: #2d3148; color: #f8fafc; border-color: #4a5180; }
+  .tab-btn:hover:not(.active) { color: #94a3b8; }
+
+  /* Trading view */
+  #view-trading { display: none; }
+  .status-bar { display: flex; align-items: center; gap: 16px; background: #1e2130;
+    border: 1px solid #2d3148; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .status-bar span { font-size: 12px; color: #64748b; }
+  .status-bar strong { color: #94a3b8; }
+  .scan-btn { background: #1e3a5f; color: #60a5fa; border: 1px solid #2a4a7f;
+    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer; margin-right: auto; }
+  .scan-btn:hover { background: #2a4a7f; }
+  .scan-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .spinning { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .signals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .signal-card { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; padding: 14px; }
+  .signal-card.score-3 { border-color: #4ade80; }
+  .signal-card.score-2 { border-color: #fb923c; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .card-ticker { font-size: 18px; font-weight: 700; color: #f8fafc; }
+  .card-score { font-size: 13px; color: #64748b; }
+  .card-price { font-size: 15px; font-family: monospace; color: #a3e635; margin: 6px 0; }
+  .card-details { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.7; }
+
   /* Chart controls */
   .chart-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .chart-controls select {
@@ -59,7 +88,25 @@
 <h1>📊 Trading Bot Dashboard</h1>
 <p class="subtitle" id="last-updated">טוען...</p>
 
-<div class="grid">
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('dashboard')">📊 דשבורד</button>
+  <button class="tab-btn" onclick="switchTab('trading')">⚡ מסחר יומי</button>
+</div>
+
+<!-- Daily trading view -->
+<div id="view-trading">
+  <div class="status-bar">
+    <span><strong>סרוק אחרון:</strong> <span id="last-scan-time">—</span></span>
+    <span><strong>סריקה הבאה:</strong> <span id="next-scan-countdown">—</span></span>
+    <span id="scan-running-indicator" style="display:none"><span class="spinning">⟳</span> סריקה בתהליך...</span>
+    <button class="scan-btn" id="scan-now-btn" onclick="triggerScan()">🔄 סרוק עכשיו</button>
+  </div>
+  <div id="signals-container" class="signals-grid">
+    <p class="empty">ממתין לסריקה הראשונה...</p>
+  </div>
+</div>
+
+<div id="view-dashboard" class="grid">
 
   <!-- Chart -->
   <div class="card full">
@@ -100,6 +147,8 @@
     <div id="feedback-container"><p class="empty">טוען...</p></div>
   </div>
 </div>
+
+</div><!-- /view-dashboard -->
 
 <div id="refresh-time"></div>
 
@@ -174,6 +223,88 @@ document.querySelectorAll('.period-btn').forEach(btn => {
     loadChart();
   });
 });
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+let tradingPollTimer = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', (i === 0 && name === 'dashboard') || (i === 1 && name === 'trading'));
+  });
+  document.getElementById('view-dashboard').style.display = name === 'dashboard' ? 'grid' : 'none';
+  document.getElementById('view-trading').style.display  = name === 'trading'   ? 'block' : 'none';
+
+  if (name === 'trading') {
+    loadRecommendations();
+    if (!tradingPollTimer) tradingPollTimer = setInterval(loadRecommendations, 5000);
+  } else {
+    clearInterval(tradingPollTimer);
+    tradingPollTimer = null;
+  }
+}
+
+// ─── Recommendations (daily trading) ─────────────────────────────────────────
+const SCORE_STARS = ['', '⭐', '⭐⭐', '⭐⭐⭐'];
+
+function fmtRelTime(ts) {
+  if (!ts) return '—';
+  const diff = Math.floor((Date.now() / 1000) - ts);
+  if (diff < 60) return `לפני ${diff} שניות`;
+  if (diff < 3600) return `לפני ${Math.floor(diff / 60)} דקות`;
+  return `לפני ${Math.floor(diff / 3600)} שעות`;
+}
+
+function fmtCountdown(ts) {
+  if (!ts) return '—';
+  const diff = Math.max(0, Math.floor(ts - Date.now() / 1000));
+  const m = Math.floor(diff / 60), s = diff % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+async function loadRecommendations() {
+  try {
+    const res = await fetch('/api/recommendations');
+    const data = await res.json();
+
+    document.getElementById('last-scan-time').textContent = fmtRelTime(data.last_scan);
+    document.getElementById('next-scan-countdown').textContent = data.running ? '—' : fmtCountdown(data.next_scan);
+    document.getElementById('scan-running-indicator').style.display = data.running ? 'inline' : 'none';
+    document.getElementById('scan-now-btn').disabled = data.running;
+
+    const container = document.getElementById('signals-container');
+    if (data.running && !data.signals.length) {
+      container.innerHTML = '<p class="empty"><span class="spinning" style="font-size:20px">⟳</span><br>סריקה בתהליך — זה יכול לקחת מספר דקות...</p>';
+      return;
+    }
+    if (!data.signals.length) {
+      container.innerHTML = '<p class="empty">לא נמצאו הזדמנויות בסריקה האחרונה</p>';
+      return;
+    }
+
+    container.innerHTML = data.signals.map(s => {
+      const badges = (s.signal_types || []).map(badge).join(' ');
+      const detailLines = Object.entries(s.details || {})
+        .map(([k, v]) => `<span style="color:#94a3b8">${k}:</span> ${v}`)
+        .join('<br>');
+      return `<div class="signal-card score-${s.score}">
+        <div class="card-header">
+          <span class="card-ticker">${s.ticker}</span>
+          <span class="card-score">${SCORE_STARS[s.score] || s.score}</span>
+        </div>
+        <div>${badges}</div>
+        <div class="card-price">$${Number(s.price).toFixed(2)}</div>
+        <div class="card-details">${detailLines}</div>
+      </div>`;
+    }).join('');
+  } catch (e) { /* silent */ }
+}
+
+async function triggerScan() {
+  const btn = document.getElementById('scan-now-btn');
+  btn.disabled = true;
+  await fetch('/api/scan', { method: 'POST' });
+  loadRecommendations();
+}
 
 // ─── Existing sections ────────────────────────────────────────────────────────
 const SIGNAL_LABELS = { breakout: 'פריצה', momentum: 'מומנטום', options: 'אופציות' };
