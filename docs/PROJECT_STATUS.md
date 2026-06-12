@@ -4,7 +4,8 @@ _Last updated: 2026-06-12_
 
 ## 📋 Current sprint
 
-- Phase 2: domain models, application ports, configuration — **delivered this session**
+- Phases 1–3 delivered this session: docs, domain models, ports, settings, yfinance market-data adapter
+- Next sprint: Phase 4 memory layer
 
 ## ✅ Completed
 
@@ -14,16 +15,16 @@ _Last updated: 2026-06-12_
 - Daily-trading live view: background scans every 5 min, 5-second UI polling, manual rescan
 - Phase 1: architecture docs, roadmap, knowledge base, project status tracking
 - Phase 2: `trading_platform` package — domain models with validation, Protocol ports, env-driven settings, unit tests
+- Phase 3: `YFinanceMarketData` adapter — TTL cache, MultiIndex flattening, NaN-row skipping, injectable downloader (9 tests)
 
 ## 📝 Backlog (priority order)
 
-1. Phase 3: `YFinanceMarketData` adapter implementing `MarketDataPort` (batched downloads, cache, retry)
-2. Phase 4: `JsonMemoryStore` implementing `MemoryStore`; migrate `feedback.py` onto it
-3. Phase 5: port breakout/momentum/options checks to `Strategy` implementations + registry
-4. `ScanService` orchestration; make `bot.py` and `dashboard.py` thin adapters
-5. Phase 6: risk rule pipeline
-6. Persist dashboard scan cache to disk (survive restarts)
-7. CI workflow (pytest on push)
+1. Phase 4: `JsonMemoryStore` implementing `MemoryStore`; migrate `feedback.py` onto it
+2. Phase 5: port breakout/momentum/options checks to `Strategy` implementations + registry
+3. `ScanService` orchestration; make `bot.py` and `dashboard.py` thin adapters
+4. Phase 6: risk rule pipeline
+5. Persist dashboard scan cache to disk (survive restarts)
+6. CI workflow (pytest on push)
 
 ## ⚠️ Technical debt
 
