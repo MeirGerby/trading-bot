@@ -14,6 +14,9 @@ DEFAULT_TASE_WATCHLIST = (
     "LUMI.TA", "POLI.TA", "DSCT.TA", "MZTF.TA",
 )
 
+# The default initial watchlist — NOT a scanning limit. The symbol repository
+# seeds the user watchlist from this on first run; symbols are added/removed
+# dynamically at runtime (dashboard pins, /api/watchlist) without restart.
 DEFAULT_WATCHLIST = DEFAULT_US_WATCHLIST + DEFAULT_TASE_WATCHLIST
 
 DEFAULT_STRATEGY_PARAMS: dict[str, float] = {
@@ -57,6 +60,10 @@ class Settings:
     telegram_chat_id: str = ""
     watchlist: tuple[str, ...] = DEFAULT_WATCHLIST
     scan_interval_minutes: int = 15
+    # Batching guards against vendor rate limits on large dynamic watchlists:
+    # pause scan_throttle_seconds after every scan_batch_size symbols.
+    scan_batch_size: int = 20
+    scan_throttle_seconds: float = 2.0
     strategy_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_STRATEGY_PARAMS))
     risk_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_RISK_PARAMS))
     fee_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_FEE_PARAMS))
@@ -83,6 +90,8 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             watchlist=watchlist,
             scan_interval_minutes=int(os.getenv("SCAN_INTERVAL_MINUTES", "15")),
+            scan_batch_size=int(os.getenv("SCAN_BATCH_SIZE", "20")),
+            scan_throttle_seconds=float(os.getenv("SCAN_THROTTLE_SECONDS", "2.0")),
             auto_execute_paper=os.getenv("AUTO_EXECUTE_PAPER", "true").lower() in ("1", "true", "yes"),
             data_dir=os.getenv("DATA_DIR", "data"),
         )

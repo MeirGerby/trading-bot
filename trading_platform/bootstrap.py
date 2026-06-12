@@ -32,25 +32,37 @@ from trading_platform.infrastructure.market_data import YFinanceMarketData
 from trading_platform.infrastructure.memory_store import JsonMemoryStore
 from trading_platform.infrastructure.options_data import YFinanceOptionsData
 from trading_platform.infrastructure.paper_broker import PaperBroker
+from trading_platform.infrastructure.symbol_repository import JsonSymbolRepository
 
 # Shared market-data adapter so the screener reuses the scan loop's bar cache
 _shared_market_data: YFinanceMarketData | None = None
 
 
-def _get_market_data() -> YFinanceMarketData:
+def get_market_data() -> YFinanceMarketData:
     global _shared_market_data
     if _shared_market_data is None:
         _shared_market_data = YFinanceMarketData()
     return _shared_market_data
 
 
+def _data_dir(settings: Settings, base_dir: str | Path | None = None) -> Path:
+    return Path(base_dir) if base_dir else Path(os.path.dirname(__file__)).parent / settings.data_dir
+
+
+def build_symbol_repository(settings: Settings | None = None,
+                            base_dir: str | Path | None = None) -> JsonSymbolRepository:
+    settings = settings or Settings.from_env()
+    memory = JsonMemoryStore(_data_dir(settings, base_dir))
+    return JsonSymbolRepository(memory, get_market_data(), settings.watchlist)
+
+
 def build_scan_service(settings: Settings | None = None,
                        base_dir: str | Path | None = None) -> ScanService:
     settings = settings or Settings.from_env()
-    data_dir = Path(base_dir) if base_dir else Path(os.path.dirname(__file__)).parent / settings.data_dir
+    data_dir = _data_dir(settings, base_dir)
 
     memory = JsonMemoryStore(data_dir)
-    market_data = _get_market_data()
+    market_data = get_market_data()
     options_data = YFinanceOptionsData()
 
     tracker = PerformanceTracker(memory, market_data)
@@ -76,14 +88,17 @@ def build_scan_service(settings: Settings | None = None,
         learning_engine=LearningEngine(memory),
         self_critique_engine=SelfCritiqueEngine(memory),
         auto_execute=settings.auto_execute_paper,  # paper broker only (ADR-5)
+        symbol_repository=JsonSymbolRepository(memory, market_data, settings.watchlist),
     )
 
 
-def build_screener_service(settings: Settings | None = None) -> ScreenerService:
+def build_screener_service(settings: Settings | None = None,
+                           base_dir: str | Path | None = None) -> ScreenerService:
     settings = settings or Settings.from_env()
     return ScreenerService(
         watchlist=settings.watchlist,
-        market_data=_get_market_data(),
+        market_data=get_market_data(),
         fundamentals=YFinanceFundamentals(),
         fee_calculator=FeeCalculator(settings.fee_params),
+        symbol_repository=build_symbol_repository(settings, base_dir),
     )

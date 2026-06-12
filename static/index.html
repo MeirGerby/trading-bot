@@ -138,8 +138,8 @@
   .market-filter-btn { background: #0f1117; color: #64748b; border: 1px solid #2d3148;
     border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer; }
   .market-filter-btn.active { background: #2d3148; color: #f8fafc; border-color: #4a5180; }
-  .screener-table-wrap { overflow-x: auto; background: #1e2130; border: 1px solid #2d3148;
-    border-radius: 8px; padding: 8px; }
+  .screener-table-wrap { overflow-x: auto; overflow-y: auto; max-height: 72vh;
+    background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; padding: 8px; }
   .screener-table { font-size: 12px; white-space: nowrap; }
   .screener-table th { cursor: pointer; user-select: none; position: sticky; top: 0;
     background: #1e2130; font-size: 11px; }
@@ -177,12 +177,45 @@
     line-height: 1.8; white-space: pre-wrap; direction: ltr; text-align: left;
     font-family: 'Consolas', monospace; display: none; }
   .reasoning-panel.open { display: block; }
+
+  /* Global symbol search */
+  .global-search { position: relative; margin-bottom: 16px; max-width: 520px; }
+  .global-search input { width: 100%; background: #1e2130; color: #e2e8f0;
+    border: 1px solid #2d3148; border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+  .global-search input:focus { outline: none; border-color: #4a5180; }
+  .search-dropdown { position: absolute; top: 100%; right: 0; left: 0; z-index: 50;
+    background: #1e2130; border: 1px solid #4a5180; border-radius: 8px; margin-top: 4px;
+    max-height: 320px; overflow-y: auto; display: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .search-dropdown.open { display: block; }
+  .search-result { display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+    cursor: pointer; border-bottom: 1px solid #1a1e2e; }
+  .search-result:last-child { border-bottom: none; }
+  .search-result:hover { background: #2d3148; }
+  .search-result .sr-symbol { font-weight: 700; color: #f8fafc; min-width: 80px; }
+  .search-result .sr-name { color: #64748b; font-size: 12px; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .watch-star { background: none; border: none; cursor: pointer; font-size: 15px;
+    color: #475569; padding: 2px; }
+  .watch-star.watched { color: #fbbf24; }
+
+  /* Quote panel (instant indicators) */
+  .quote-stats { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+  .quote-stat { background: #161a27; border: 1px solid #2d3148; border-radius: 6px;
+    padding: 8px 14px; min-width: 100px; }
+  .quote-stat .q-label { font-size: 10px; color: #475569; text-transform: uppercase; }
+  .quote-stat .q-val { font-size: 15px; font-weight: 700; color: #f8fafc; margin-top: 2px; }
 </style>
 </head>
 <body>
 
 <h1>📊 Trading Bot Dashboard</h1>
 <p class="subtitle" id="last-updated">טוען...</p>
+
+<div class="global-search">
+  <input type="text" id="global-search-input" autocomplete="off"
+         placeholder='🔎 חפש כל מניה — ארה"ב או ת"א (טיקר או שם חברה)...'>
+  <div id="search-dropdown" class="search-dropdown"></div>
+</div>
 
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('dashboard')">📊 דשבורד</button>
@@ -228,7 +261,7 @@
     <table class="screener-table" id="screener-table">
       <thead><tr id="screener-head"></tr></thead>
       <tbody id="screener-body">
-        <tr><td colspan="13"><p class="empty">טוען נתוני יסוד — עד דקה בטעינה ראשונה...</p></td></tr>
+        <tr><td colspan="14"><p class="empty">טוען נתוני יסוד — עד דקה בטעינה ראשונה...</p></td></tr>
       </tbody>
     </table>
   </div>
@@ -295,18 +328,24 @@
 <!-- ──────────────────────── Dashboard (default) ────────────────────────── -->
 <div id="view-dashboard" class="grid">
 
+  <!-- Instant quote panel (populated by the global search) -->
+  <div class="card full" id="quote-panel" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="card-ticker" id="quote-symbol"></span>
+      <span id="quote-market"></span>
+      <span id="quote-name" style="color:#64748b;font-size:13px"></span>
+      <button class="watch-star" id="quote-watch-btn" onclick="toggleQuoteWatch()" title="הוסף/הסר ממעקב">★</button>
+      <button class="scan-btn" onclick="showQuoteChart()">📈 הצג גרף</button>
+      <button class="reasoning-toggle" onclick="closeQuote()" style="margin-right:0">✕ סגור</button>
+    </div>
+    <div class="quote-stats" id="quote-stats"></div>
+  </div>
+
   <!-- Chart -->
   <div class="card full">
     <h2>גרף שוק ההון</h2>
     <div class="chart-controls">
-      <select id="ticker-select">
-        <option>AAPL</option><option>MSFT</option><option>NVDA</option>
-        <option>TSLA</option><option>AMZN</option><option>META</option>
-        <option>GOOGL</option><option>AMD</option><option>SMCI</option>
-        <option>PLTR</option><option>MSTR</option><option>COIN</option>
-        <option>HOOD</option><option>RIVN</option><option>LCID</option>
-        <option>SPY</option><option>QQQ</option><option>IWM</option>
-      </select>
+      <select id="ticker-select"></select>
       <button class="period-btn active" data-period="1d">יומי</button>
       <button class="period-btn" data-period="5d">שבועי</button>
       <button class="period-btn" data-period="1mo">חודשי</button>
@@ -417,6 +456,130 @@ async function loadChart() {
 }
 
 document.getElementById('ticker-select').addEventListener('change', e => { currentTicker = e.target.value; loadChart(); });
+
+// Chart ticker dropdown follows the dynamic watchlist (any symbol can be injected)
+async function loadWatchlistSelect(extraSymbol) {
+  try {
+    const res = await fetch('/api/watchlist');
+    const data = await res.json();
+    const select = document.getElementById('ticker-select');
+    const symbols = [...data.symbols];
+    if (extraSymbol && !symbols.includes(extraSymbol)) symbols.unshift(extraSymbol);
+    if (!symbols.includes(currentTicker)) symbols.unshift(currentTicker);
+    select.innerHTML = symbols.map(s => `<option${s === currentTicker ? ' selected' : ''}>${s}</option>`).join('');
+  } catch(e) {}
+}
+
+// ─── Global symbol search ─────────────────────────────────────────────────────
+let searchDebounce = null;
+const searchInput = document.getElementById('global-search-input');
+const searchDropdown = document.getElementById('search-dropdown');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchDebounce);
+  const q = searchInput.value.trim();
+  if (q.length < 1) { searchDropdown.classList.remove('open'); return; }
+  searchDebounce = setTimeout(() => runSearch(q), 250);
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.global-search')) searchDropdown.classList.remove('open');
+});
+
+async function runSearch(q) {
+  try {
+    const res = await fetch(`/api/stocks/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!data.results.length) {
+      searchDropdown.innerHTML = '<div class="search-result"><span class="sr-name">לא נמצאו תוצאות — נסה טיקר מדויק (למשל DIS או BEZQ.TA)</span></div>';
+    } else {
+      searchDropdown.innerHTML = data.results.map(r => `
+        <div class="search-result" onclick="selectSearchResult('${r.symbol}')">
+          <span class="sr-symbol">${r.symbol}</span>
+          <span class="market-tag market-${r.market}">${r.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${r.market}</span>
+          <span class="sr-name">${r.name || ''}</span>
+          <button class="watch-star ${r.watched ? 'watched' : ''}"
+                  onclick="event.stopPropagation(); toggleWatch('${r.symbol}', ${r.watched}, this)"
+                  title="${r.watched ? 'הסר ממעקב' : 'הוסף למעקב'}">★</button>
+        </div>`).join('');
+    }
+    searchDropdown.classList.add('open');
+  } catch(e) {}
+}
+
+async function toggleWatch(symbol, watched, btn) {
+  try {
+    const res = await fetch(`/api/watchlist/${symbol}`, { method: watched ? 'DELETE' : 'POST' });
+    if (res.ok && btn) {
+      btn.classList.toggle('watched', !watched);
+      btn.setAttribute('onclick', `event.stopPropagation(); toggleWatch('${symbol}', ${!watched}, this)`);
+    }
+    loadWatchlistSelect();
+  } catch(e) {}
+}
+
+// ─── Quote panel (instant indicators for any symbol) ──────────────────────────
+let quoteSymbol = null, quoteWatched = false;
+
+async function selectSearchResult(symbol) {
+  searchDropdown.classList.remove('open');
+  searchInput.value = symbol;
+  switchTab('dashboard');
+  await loadQuote(symbol);
+}
+
+async function loadQuote(symbol) {
+  try {
+    const res = await fetch(`/api/stocks/${symbol}/indicators`);
+    if (!res.ok) return;
+    const d = await res.json();
+    quoteSymbol = d.symbol; quoteWatched = !!d.watched;
+
+    document.getElementById('quote-symbol').textContent = d.symbol;
+    document.getElementById('quote-name').textContent = d.name || '';
+    document.getElementById('quote-market').innerHTML =
+      `<span class="market-tag market-${d.market}">${d.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${d.market}</span>`;
+    document.getElementById('quote-watch-btn').className = `watch-star ${quoteWatched ? 'watched' : ''}`;
+
+    const chg = d.change_1d_pct;
+    const stats = [
+      ['מחיר', fmtMarketPrice(d.price, d.market) +
+        (chg != null ? ` <span class="${chg >= 0 ? 'up' : 'down'}" style="font-size:11px">${chg >= 0 ? '+' : ''}${chg}%</span>` : '')],
+      ['RSI', d.rsi != null ? d.rsi : '—'],
+      ['MA20', d.ma20 != null ? fmtMarketPrice(d.ma20, d.market) : '—'],
+      ['מול MA20', d.pct_vs_ma20 != null ? `<span class="${d.pct_vs_ma20 >= 0 ? 'up' : 'down'}">${d.pct_vs_ma20 >= 0 ? '+' : ''}${d.pct_vs_ma20}%</span>` : '—'],
+      ['% משיא 52ש', d.pct_of_52w_high != null ? d.pct_of_52w_high + '%' : '—'],
+      ['יחס נפח', d.volume_ratio != null ? d.volume_ratio + 'x' : '—'],
+    ];
+    document.getElementById('quote-stats').innerHTML = stats.map(([label, val]) =>
+      `<div class="quote-stat"><div class="q-label">${label}</div><div class="q-val">${val}</div></div>`).join('');
+    document.getElementById('quote-panel').style.display = 'block';
+
+    // Load the chart for the searched symbol too
+    currentTicker = d.symbol;
+    loadWatchlistSelect(d.symbol);
+    loadChart();
+  } catch(e) {}
+}
+
+async function toggleQuoteWatch() {
+  if (!quoteSymbol) return;
+  await toggleWatch(quoteSymbol, quoteWatched, null);
+  quoteWatched = !quoteWatched;
+  document.getElementById('quote-watch-btn').className = `watch-star ${quoteWatched ? 'watched' : ''}`;
+}
+
+function showQuoteChart() {
+  if (!quoteSymbol) return;
+  currentTicker = quoteSymbol;
+  loadWatchlistSelect(quoteSymbol);
+  loadChart();
+  document.getElementById('chart-container').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeQuote() {
+  document.getElementById('quote-panel').style.display = 'none';
+}
 document.querySelectorAll('.period-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
@@ -567,6 +730,7 @@ let screenerSort = { key: 'market_cap', dir: -1 };
 let marketFilter = 'ALL';
 
 const SCREENER_COLS = [
+  { key: '_watch',               label: '★' },
   { key: 'symbol',               label: 'טיקר' },
   { key: 'name',                 label: 'חברה' },
   { key: 'market',               label: 'שוק' },
@@ -601,9 +765,17 @@ function setMarketFilter(btn) {
 }
 
 function sortScreener(key) {
+  if (key === '_watch') return;
   if (screenerSort.key === key) screenerSort.dir *= -1;
   else screenerSort = { key, dir: -1 };
   renderScreener();
+}
+
+async function unwatchFromScreener(symbol) {
+  await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE' });
+  screenerRows = screenerRows.filter(r => r.symbol !== symbol);
+  renderScreener();
+  loadWatchlistSelect();
 }
 
 async function loadScreener() {
@@ -624,7 +796,24 @@ async function refreshScreener() {
   setTimeout(loadScreener, 3000);
 }
 
+// Infinite scroll: render in chunks so hundreds of rows stay smooth
+const SCREENER_CHUNK = 60;
+let screenerVisible = SCREENER_CHUNK;
+let screenerFiltered = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+  const wrap = document.querySelector('.screener-table-wrap');
+  if (wrap) wrap.addEventListener('scroll', () => {
+    if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 120
+        && screenerVisible < screenerFiltered.length) {
+      screenerVisible += SCREENER_CHUNK;
+      renderScreenerBody();
+    }
+  });
+});
+
 function renderScreener() {
+  screenerVisible = SCREENER_CHUNK;
   const head = document.getElementById('screener-head');
   head.innerHTML = SCREENER_COLS.map(c => {
     const arrow = screenerSort.key === c.key ? `<span class="sort-arrow">${screenerSort.dir < 0 ? '▼' : '▲'}</span>` : '';
@@ -648,9 +837,15 @@ function renderScreener() {
     return (va - vb) * dir;
   });
 
+  screenerFiltered = rows;
+  renderScreenerBody();
+}
+
+function renderScreenerBody() {
   const body = document.getElementById('screener-body');
+  const rows = screenerFiltered.slice(0, screenerVisible);
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="13"><p class="empty">אין תוצאות</p></td></tr>';
+    body.innerHTML = '<tr><td colspan="14"><p class="empty">אין תוצאות — חפש מניה בשורת החיפוש למעלה והוסף אותה למעקב ★</p></td></tr>';
     return;
   }
   body.innerHTML = rows.map(r => {
@@ -662,7 +857,8 @@ function renderScreener() {
       ? `${r.fees.round_trip} ${r.fees.currency === 'ILS' ? '₪' : '$'}`
       : '—';
     return `<tr>
-      <td><strong>${r.symbol}</strong></td>
+      <td><button class="watch-star watched" onclick="unwatchFromScreener('${r.symbol}')" title="הסר ממעקב">★</button></td>
+      <td><strong style="cursor:pointer" onclick="loadQuote('${r.symbol}')">${r.symbol}</strong></td>
       <td style="color:#94a3b8">${r.name || '—'}</td>
       <td><span class="market-tag market-${r.market}">${r.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${r.market}</span></td>
       <td class="price">${r.price != null ? cur + r.price : '—'}</td>
@@ -967,7 +1163,7 @@ async function refreshDashboard() {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 initChart();
-loadChart();
+loadWatchlistSelect().then(loadChart);
 refreshDashboard();
 setInterval(refreshDashboard, 30000);
 </script>

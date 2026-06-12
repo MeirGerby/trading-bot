@@ -25,6 +25,7 @@ from trading_platform.application.ports import (
     MarketDataPort,
     MemoryStore,
     Strategy,
+    SymbolRepositoryPort,
 )
 from trading_platform.application.services.decision_engine import DecisionEngine
 from trading_platform.application.services.learning_engine import LearningEngine
@@ -135,7 +136,8 @@ class ScanService:
                  meta_decision_engine: MetaDecisionEngine | None = None,
                  learning_engine: LearningEngine | None = None,
                  self_critique_engine: SelfCritiqueEngine | None = None,
-                 auto_execute: bool = False):
+                 auto_execute: bool = False,
+                 symbol_repository: SymbolRepositoryPort | None = None):
         self._settings = settings
         self._strategies = strategies
         self._memory = memory
@@ -152,6 +154,21 @@ class ScanService:
         # Auto-execution acts only through the injected broker, which is
         # PaperBroker in bootstrap (ADR-5: live trading needs owner approval).
         self._auto_execute = auto_execute
+        self._symbols = symbol_repository
+
+    def active_watchlist(self) -> tuple[str, ...]:
+        """Dynamic watchlist from the symbol repository; settings fallback.
+
+        Read at scan time, so dashboard pins/unpins apply without restart.
+        """
+        if self._symbols is not None:
+            try:
+                watchlist = self._symbols.get_watchlist()
+                if watchlist:
+                    return watchlist
+            except Exception:
+                logger.exception("symbol repository unavailable, using settings watchlist")
+        return self._settings.watchlist
 
     def current_params(self) -> dict[str, float]:
         merged = dict(self._settings.strategy_params)
@@ -162,7 +179,8 @@ class ScanService:
         started = datetime.now(timezone.utc)
         params = self.current_params()
         portfolio = self._broker.get_portfolio()
-        self._audit.record("scan_started", {"symbols": len(self._settings.watchlist)})
+        watchlist = self.active_watchlist()
+        self._audit.record("scan_started", {"symbols": len(watchlist)})
 
         # Evaluate pending outcomes before generating new recommendations
         new_outcomes = []
@@ -175,7 +193,14 @@ class ScanService:
         recommendations: list[Recommendation] = []
         errors: list[str] = []
 
-        for symbol in self._settings.watchlist:
+        batch_size = max(1, int(self._settings.scan_batch_size))
+        throttle = max(0.0, float(self._settings.scan_throttle_seconds))
+
+        for i, symbol in enumerate(watchlist):
+            # Rate-limit guard for large dynamic watchlists: pause between batches
+            if i and i % batch_size == 0 and throttle > 0:
+                time.sleep(throttle)
+
             instrument = Instrument(symbol=symbol)
             signals: list[Signal] = []
             for strategy in self._strategies:
@@ -243,7 +268,7 @@ class ScanService:
             recommendations=tuple(recommendations),
             started_at=started,
             finished_at=finished,
-            symbols_scanned=len(self._settings.watchlist),
+            symbols_scanned=len(watchlist),
             errors=tuple(errors),
         )
 

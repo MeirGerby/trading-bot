@@ -1,14 +1,13 @@
 # Project Status
 
-_Last updated: 2026-06-12 (dual-market + autonomous execution session)_
+_Last updated: 2026-06-12 (dynamic symbol universe session)_
 
 ## 📋 Current sprint
 
-- Delivered: dual-market coverage (US + TASE), fundamentals screener grid (market cap,
-  target price, dividend yield, ROE, P/B, risk level, dynamic fees), autonomous paper
-  execution with a live trade feed and per-decision explainability panels, intelligence
-  layer (PerformanceTracker, LearningEngine, MetaDecisionEngine, SelfCritiqueEngine),
-  2 new strategies (mean reversion, trend following), 6-tab dashboard
+- Delivered: removed hardcoded ticker limits — dynamic symbol repository (179-symbol seed
+  universe + live-validated discovery of any US/TASE listing), runtime watchlist pin/unpin
+  via API + UI, global search bar with autocomplete and instant technical snapshots,
+  scan batching/throttling for rate-limit safety, infinite-scroll screener
 - Next sprint: CI workflow + Simulation Engine (backtest old vs new policy before adoption)
 
 ## ✅ Completed
@@ -27,7 +26,14 @@ _Last updated: 2026-06-12 (dual-market + autonomous execution session)_
   trade log with full reasoning persisted, live feed in UI (ADR-5 still enforced)
 - Explainability: build_reasoning() renders signals, decision logic, sizing, and risk review
   for every recommendation and trade ("Why this decision?" panels)
-- 158 tests passing, including full-pipeline integration tests (fake market data only)
+- Dynamic symbol universe: SymbolRepositoryPort + JsonSymbolRepository (seed of ~180 US/TASE
+  records merged with runtime-discovered symbols, validated against live quotes); user
+  watchlist persisted in the shared store and read at scan time — pins apply without restart
+- Endpoints: /api/stocks/search, /api/stocks/{symbol}/indicators (on-demand RSI/MA20/52w-high/
+  volume-ratio snapshot), /api/watchlist CRUD, paginated /api/screener
+- Scan batching: SCAN_BATCH_SIZE / SCAN_THROTTLE_SECONDS pause between symbol batches to
+  respect vendor rate limits on large watchlists
+- 183 tests passing, including full-pipeline integration tests (fake market data only)
 
 ## 📝 Backlog (priority order)
 

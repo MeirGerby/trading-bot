@@ -297,3 +297,157 @@ class TestAutoExecution:
         service.scan()
         assert broker.get_portfolio().positions == ()
         assert service.recent_trades() == []
+
+
+# ---------------------------------------------------------------------------
+# Dynamic watchlist (symbol repository drives scanning + screening)
+# ---------------------------------------------------------------------------
+
+class FakeSymbolRepo:
+    def __init__(self, watchlist):
+        self.watchlist = list(watchlist)
+
+    def search(self, query, limit=20):
+        return []
+
+    def lookup(self, symbol):
+        return {"symbol": symbol, "name": "", "market": "US"}
+
+    def get_watchlist(self):
+        return tuple(self.watchlist)
+
+    def add_to_watchlist(self, symbol):
+        self.watchlist.append(symbol)
+        return True
+
+    def remove_from_watchlist(self, symbol):
+        self.watchlist.remove(symbol)
+        return True
+
+
+class TestDynamicWatchlist:
+    def test_scan_uses_repository_watchlist_not_settings(self, tmp_path):
+        settings = Settings(watchlist=("IGNORED",))
+        market_data = FakeMarketData({"HOT": HOT_BARS})
+        memory = JsonMemoryStore(tmp_path)
+        repo = FakeSymbolRepo(["HOT"])
+        service = ScanService(
+            settings=settings,
+            strategies=(BreakoutStrategy(market_data), MomentumStrategy(market_data)),
+            memory=memory,
+            market_data=market_data,
+            decision_engine=DecisionEngine(memory),
+            portfolio_engine=PortfolioEngine(DEFAULT_RISK_PARAMS),
+            risk_engine=default_risk_engine(DEFAULT_RISK_PARAMS),
+            broker=PaperBroker(memory, 100_000.0),
+            audit=JsonlAuditLog(tmp_path / "audit.jsonl"),
+            symbol_repository=repo,
+        )
+        report = service.scan()
+        assert report.symbols_scanned == 1
+        assert [r.instrument.symbol for r in report.recommendations] == ["HOT"]
+
+        # Watchlist change applies on the next scan without reconstruction
+        repo.add_to_watchlist("HOT2")
+        market_data.bars_by_symbol["HOT2"] = HOT_BARS
+        assert service.scan().symbols_scanned == 2
+
+    def test_scan_falls_back_to_settings_without_repo(self, tmp_path):
+        settings = Settings(watchlist=("HOT",))
+        market_data = FakeMarketData({"HOT": HOT_BARS})
+        memory = JsonMemoryStore(tmp_path)
+        service = ScanService(
+            settings=settings,
+            strategies=(BreakoutStrategy(market_data),),
+            memory=memory,
+            market_data=market_data,
+            decision_engine=DecisionEngine(memory),
+            portfolio_engine=PortfolioEngine(DEFAULT_RISK_PARAMS),
+            risk_engine=default_risk_engine(DEFAULT_RISK_PARAMS),
+            broker=PaperBroker(memory, 100_000.0),
+            audit=JsonlAuditLog(tmp_path / "audit.jsonl"),
+        )
+        assert service.active_watchlist() == ("HOT",)
+
+    def test_screener_follows_repository_watchlist(self):
+        bars = make_bars([100.0 + i * 0.1 for i in range(120)])
+        market_data = FakeMarketData({"AAPL": bars, "DIS": bars})
+        fundamentals = FakeFundamentals({})
+        repo = FakeSymbolRepo(["DIS"])
+        screener = ScreenerService(("AAPL",), market_data, fundamentals,
+                                   FeeCalculator(DEFAULT_FEE_PARAMS),
+                                   symbol_repository=repo)
+        rows = screener.build_rows()["rows"]
+        assert [r["symbol"] for r in rows] == ["DIS"]
+
+
+class TestScanBatching:
+    def test_throttle_sleeps_between_batches(self, tmp_path, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(
+            "trading_platform.application.services.scan_service.time.sleep",
+            lambda s: sleeps.append(s))
+
+        settings = Settings(watchlist=tuple(f"S{i}" for i in range(5)),
+                            scan_batch_size=2, scan_throttle_seconds=1.5)
+        market_data = FakeMarketData({})  # no data → no signals, loop still runs
+        memory = JsonMemoryStore(tmp_path)
+        service = ScanService(
+            settings=settings,
+            strategies=(BreakoutStrategy(market_data),),
+            memory=memory,
+            market_data=market_data,
+            decision_engine=DecisionEngine(memory),
+            portfolio_engine=PortfolioEngine(DEFAULT_RISK_PARAMS),
+            risk_engine=default_risk_engine(DEFAULT_RISK_PARAMS),
+            broker=PaperBroker(memory, 100_000.0),
+            audit=JsonlAuditLog(tmp_path / "audit.jsonl"),
+        )
+        service.scan()
+        # 5 symbols, batch=2 → pauses after symbols 2 and 4
+        assert sleeps == [1.5, 1.5]
+
+    def test_no_throttle_when_zero(self, tmp_path, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(
+            "trading_platform.application.services.scan_service.time.sleep",
+            lambda s: sleeps.append(s))
+        settings = Settings(watchlist=tuple(f"S{i}" for i in range(5)),
+                            scan_batch_size=2, scan_throttle_seconds=0.0)
+        market_data = FakeMarketData({})
+        memory = JsonMemoryStore(tmp_path)
+        service = ScanService(
+            settings=settings,
+            strategies=(BreakoutStrategy(market_data),),
+            memory=memory,
+            market_data=market_data,
+            decision_engine=DecisionEngine(memory),
+            portfolio_engine=PortfolioEngine(DEFAULT_RISK_PARAMS),
+            risk_engine=default_risk_engine(DEFAULT_RISK_PARAMS),
+            broker=PaperBroker(memory, 100_000.0),
+            audit=JsonlAuditLog(tmp_path / "audit.jsonl"),
+        )
+        service.scan()
+        assert sleeps == []
+
+
+class TestTechnicalSnapshot:
+    def test_snapshot_fields(self):
+        from trading_platform.application.services.screener_service import technical_snapshot
+        bars = make_bars([100.0 + i * 0.5 for i in range(60)],
+                         [1_000_000.0] * 59 + [2_000_000.0])
+        md = FakeMarketData({"AAPL": bars})
+        snap = technical_snapshot("AAPL", md)
+        assert snap["symbol"] == "AAPL"
+        assert snap["market"] == "US"
+        assert snap["price"] == 129.5
+        assert snap["rsi"] is not None
+        assert snap["ma20"] is not None
+        assert snap["pct_vs_ma20"] > 0       # uptrend → above MA
+        assert snap["pct_of_52w_high"] == 100.0  # closes at the high
+        assert snap["volume_ratio"] == pytest.approx(2.0, abs=0.01)
+
+    def test_snapshot_insufficient_history(self):
+        md = FakeMarketData({"X": make_bars([100.0] * 5)})
+        from trading_platform.application.services.screener_service import technical_snapshot
+        assert technical_snapshot("X", md) is None

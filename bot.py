@@ -125,7 +125,7 @@ async def cmd_feedback_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cmd_watchlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    tickers = ", ".join(config.WATCHLIST)
+    tickers = ", ".join(scan_service.active_watchlist())
     await update.message.reply_text(f"📋 *Watchlist:*\n{_esc(tickers)}", parse_mode="MarkdownV2")
 
 

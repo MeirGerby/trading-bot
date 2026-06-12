@@ -13,7 +13,12 @@ import logging
 import math
 from datetime import datetime, timezone
 
-from trading_platform.application.ports import FundamentalsPort, MarketDataPort
+from trading_platform.application.indicators import rsi, sma
+from trading_platform.application.ports import (
+    FundamentalsPort,
+    MarketDataPort,
+    SymbolRepositoryPort,
+)
 from trading_platform.application.services.fee_calculator import FeeCalculator
 from trading_platform.domain import Bar, RiskLevel, RiskMetrics, market_for_symbol
 
@@ -60,17 +65,60 @@ def classify_risk(annual_vol: float, beta: float | None, max_dd: float) -> RiskL
     return RiskLevel.LOW if score <= 1 else RiskLevel.MEDIUM if score <= 3 else RiskLevel.HIGH
 
 
+def technical_snapshot(symbol: str, market_data: MarketDataPort) -> dict | None:
+    """On-demand technical indicators for any symbol (global search view)."""
+    bars = market_data.get_daily_bars(symbol, 252)
+    if len(bars) < 21:
+        return None
+
+    closes = [b.close for b in bars]
+    volumes = [b.volume for b in bars]
+    price = closes[-1]
+    prev = closes[-2] if len(closes) > 1 else price
+
+    ma20 = sma(closes, 20)
+    current_rsi = rsi(closes)
+    high_52w = max(closes)
+    avg_volume_20 = sum(volumes[-21:-1]) / 20 if len(volumes) >= 21 else 0.0
+    vol_ratio = volumes[-1] / avg_volume_20 if avg_volume_20 > 0 else None
+
+    return {
+        "symbol": symbol,
+        "market": market_for_symbol(symbol).value,
+        "price": round(price, 2),
+        "change_1d_pct": round((price / prev - 1) * 100, 2) if prev > 0 else None,
+        "rsi": round(current_rsi, 1) if current_rsi is not None else None,
+        "ma20": round(ma20, 2) if ma20 is not None else None,
+        "pct_vs_ma20": round((price / ma20 - 1) * 100, 1) if ma20 else None,
+        "high_52w": round(high_52w, 2),
+        "pct_of_52w_high": round(price / high_52w * 100, 1) if high_52w > 0 else None,
+        "volume_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
+    }
+
+
 class ScreenerService:
     def __init__(self, watchlist: tuple[str, ...], market_data: MarketDataPort,
-                 fundamentals: FundamentalsPort, fee_calculator: FeeCalculator):
+                 fundamentals: FundamentalsPort, fee_calculator: FeeCalculator,
+                 symbol_repository: SymbolRepositoryPort | None = None):
         self._watchlist = watchlist
         self._market_data = market_data
         self._fundamentals = fundamentals
         self._fees = fee_calculator
+        self._symbols = symbol_repository
+
+    def active_symbols(self) -> tuple[str, ...]:
+        if self._symbols is not None:
+            try:
+                watchlist = self._symbols.get_watchlist()
+                if watchlist:
+                    return watchlist
+            except Exception:
+                logger.exception("symbol repository unavailable, using static watchlist")
+        return self._watchlist
 
     def build_rows(self) -> dict:
         rows = []
-        for symbol in self._watchlist:
+        for symbol in self.active_symbols():
             try:
                 rows.append(self._build_row(symbol))
             except Exception:

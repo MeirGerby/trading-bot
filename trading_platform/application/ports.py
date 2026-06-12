@@ -43,6 +43,26 @@ class FundamentalsPort(Protocol):
 
 
 @runtime_checkable
+class SymbolRepositoryPort(Protocol):
+    """Dynamic symbol universe + user watchlist (replaces hardcoded ticker lists).
+
+    The universe is seed data merged with runtime-discovered symbols; lookup()
+    of an unknown symbol validates it against live market data and, if real,
+    adds it — so any listed US/TASE symbol is reachable.
+    """
+
+    def search(self, query: str, limit: int = 20) -> list[dict]: ...
+
+    def lookup(self, symbol: str) -> dict | None: ...
+
+    def get_watchlist(self) -> tuple[str, ...]: ...
+
+    def add_to_watchlist(self, symbol: str) -> bool: ...
+
+    def remove_from_watchlist(self, symbol: str) -> bool: ...
+
+
+@runtime_checkable
 class Strategy(Protocol):
     """Data dependencies are injected at construction (ADR-6)."""
 

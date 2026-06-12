@@ -19,8 +19,14 @@ from trading_platform.application.services import recommendation_to_dict
 from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
+from trading_platform.application.services.screener_service import technical_snapshot
 from trading_platform.application.services.self_critique_engine import SelfCritiqueEngine
-from trading_platform.bootstrap import build_scan_service, build_screener_service
+from trading_platform.bootstrap import (
+    build_scan_service,
+    build_screener_service,
+    build_symbol_repository,
+    get_market_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,7 @@ _meta: MetaDecisionEngine | None = getattr(_scan_service, "_meta", None)
 _learning: LearningEngine | None = getattr(_scan_service, "_learning", None)
 _critique: SelfCritiqueEngine | None = getattr(_scan_service, "_critique", None)
 
+_symbol_repo = build_symbol_repository()
 _screener_service = build_screener_service()
 _screener_cache: dict = {"rows": [], "ts": 0.0, "running": False}
 _SCREENER_INTERVAL = 600  # fundamentals are slow + heavily cached; 10 min is plenty
@@ -348,12 +355,65 @@ def get_learning():
 
 
 @app.get("/api/screener")
-def get_screener():
+def get_screener(limit: int = 0, offset: int = 0):
+    rows = _screener_cache["rows"]
+    total = len(rows)
+    if offset:
+        rows = rows[offset:]
+    if limit:
+        rows = rows[:limit]
     return JSONResponse({
-        "rows": _screener_cache["rows"],
+        "rows": rows,
+        "total": total,
         "last_refresh": _screener_cache["ts"],
         "running": _screener_cache["running"],
     })
+
+
+@app.get("/api/stocks/search")
+def search_stocks(q: str = "", limit: int = 20, market: str | None = None):
+    try:
+        results = _symbol_repo.search(q, limit=min(limit, 50), market=market)
+    except Exception:
+        logger.exception("symbol search failed")
+        results = []
+    return JSONResponse({"query": q, "results": results})
+
+
+@app.get("/api/stocks/{symbol}/indicators")
+def stock_indicators(symbol: str):
+    symbol = symbol.upper()
+    record = _symbol_repo.lookup(symbol)
+    if record is None:
+        return JSONResponse({"error": f"unknown symbol {symbol}"}, status_code=404)
+    snapshot = technical_snapshot(symbol, get_market_data())
+    if snapshot is None:
+        return JSONResponse({"error": f"no price history for {symbol}"}, status_code=404)
+    snapshot["name"] = record.get("name", "")
+    snapshot["watched"] = symbol in _symbol_repo.get_watchlist()
+    return JSONResponse(snapshot)
+
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    symbols = _symbol_repo.get_watchlist()
+    return JSONResponse({"symbols": list(symbols), "count": len(symbols)})
+
+
+@app.post("/api/watchlist/{symbol}")
+def add_watch(symbol: str):
+    if not _symbol_repo.add_to_watchlist(symbol):
+        return JSONResponse({"error": f"could not validate symbol {symbol}"}, status_code=400)
+    threading.Thread(target=_run_screener, daemon=True).start()  # pick up the new row
+    return JSONResponse({"status": "added", "symbols": list(_symbol_repo.get_watchlist())})
+
+
+@app.delete("/api/watchlist/{symbol}")
+def remove_watch(symbol: str):
+    if not _symbol_repo.remove_from_watchlist(symbol):
+        return JSONResponse({"error": f"{symbol} not in watchlist"}, status_code=404)
+    threading.Thread(target=_run_screener, daemon=True).start()
+    return JSONResponse({"status": "removed", "symbols": list(_symbol_repo.get_watchlist())})
 
 
 @app.post("/api/screener/refresh")
