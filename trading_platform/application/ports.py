@@ -13,6 +13,7 @@ from typing import Protocol, runtime_checkable
 from trading_platform.domain import (
     Bar,
     FeedbackEvent,
+    FundamentalData,
     Instrument,
     OptionContract,
     Order,
@@ -34,6 +35,11 @@ class MarketDataPort(Protocol):
 @runtime_checkable
 class OptionsDataPort(Protocol):
     def get_option_contracts(self, symbol: str, max_expirations: int = 2) -> list[OptionContract]: ...
+
+
+@runtime_checkable
+class FundamentalsPort(Protocol):
+    def get_fundamentals(self, symbol: str) -> FundamentalData | None: ...
 
 
 @runtime_checkable

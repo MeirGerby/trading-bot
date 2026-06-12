@@ -127,6 +127,56 @@
   .audit-row:last-child { border-bottom: none; }
   .audit-event { color: #60a5fa; font-weight: 600; margin-left: 8px; }
   .audit-ts { color: #334155; font-size: 11px; }
+
+  /* Screener */
+  #view-screener { display: none; }
+  .screener-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    background: #1e2130; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 14px; }
+  .screener-toolbar input { background: #0f1117; color: #e2e8f0; border: 1px solid #2d3148;
+    border-radius: 6px; padding: 6px 12px; font-size: 13px; width: 200px; }
+  .market-filter-btn { background: #0f1117; color: #64748b; border: 1px solid #2d3148;
+    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer; }
+  .market-filter-btn.active { background: #2d3148; color: #f8fafc; border-color: #4a5180; }
+  .screener-table-wrap { overflow-x: auto; background: #1e2130; border: 1px solid #2d3148;
+    border-radius: 8px; padding: 8px; }
+  .screener-table { font-size: 12px; white-space: nowrap; }
+  .screener-table th { cursor: pointer; user-select: none; position: sticky; top: 0;
+    background: #1e2130; font-size: 11px; }
+  .screener-table th:hover { color: #cbd5e1; }
+  .screener-table th .sort-arrow { font-size: 9px; margin-right: 3px; color: #60a5fa; }
+  .market-tag { display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; }
+  .market-US { background: #1e3a5f; color: #60a5fa; }
+  .market-TASE { background: #1a3a2a; color: #4ade80; }
+  .risk-tag { display: inline-block; padding: 1px 8px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; }
+  .risk-low { background: #1a3a2a; color: #4ade80; }
+  .risk-medium { background: #3a2f1a; color: #fbbf24; }
+  .risk-high { background: #3a1a1a; color: #f87171; }
+  .risk-unknown { background: #1e2130; color: #475569; }
+
+  /* Live trading feed & reasoning */
+  .live-section-title { display: flex; align-items: center; gap: 8px; font-size: 13px;
+    font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em;
+    margin: 18px 0 10px; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80;
+    animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  .trade-row { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 8px; }
+  .trade-row.filled { border-right: 3px solid #4ade80; }
+  .trade-row.rejected { border-right: 3px solid #f87171; opacity: .75; }
+  .trade-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .trade-side-buy { color: #4ade80; font-weight: 700; font-size: 12px; }
+  .trade-side-sell { color: #f87171; font-weight: 700; font-size: 12px; }
+  .reasoning-toggle { background: none; border: none; color: #60a5fa; font-size: 11px;
+    cursor: pointer; padding: 0; margin-right: auto; }
+  .reasoning-panel { background: #12141d; border: 1px solid #252840; border-radius: 6px;
+    padding: 10px 12px; margin-top: 8px; font-size: 12px; color: #94a3b8;
+    line-height: 1.8; white-space: pre-wrap; direction: ltr; text-align: left;
+    font-family: 'Consolas', monospace; display: none; }
+  .reasoning-panel.open { display: block; }
 </style>
 </head>
 <body>
@@ -136,22 +186,51 @@
 
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('dashboard')">📊 דשבורד</button>
-  <button class="tab-btn" onclick="switchTab('trading')">⚡ מסחר יומי</button>
+  <button class="tab-btn" onclick="switchTab('trading')">⚡ מסחר חי</button>
+  <button class="tab-btn" onclick="switchTab('screener')">🔎 סורק מניות</button>
   <button class="tab-btn" onclick="switchTab('portfolio')">💼 פורטפוליו</button>
   <button class="tab-btn" onclick="switchTab('performance')">📈 ביצועים</button>
   <button class="tab-btn" onclick="switchTab('intelligence')">🧠 בינה</button>
 </div>
 
-<!-- ──────────────────────── Daily Trading ──────────────────────────────── -->
+<!-- ──────────────────────── Live Trading ───────────────────────────────── -->
 <div id="view-trading">
   <div class="status-bar">
     <span><strong>סרוק אחרון:</strong> <span id="last-scan-time">—</span></span>
     <span><strong>סריקה הבאה:</strong> <span id="next-scan-countdown">—</span></span>
     <span id="scan-running-indicator" style="display:none"><span class="spinning">⟳</span> סריקה בתהליך...</span>
+    <span style="color:#fbbf24">📝 Paper Trading</span>
     <button class="scan-btn" id="scan-now-btn" onclick="triggerScan()">🔄 סרוק עכשיו</button>
   </div>
+
+  <div class="live-section-title"><span class="live-dot"></span> ביצועי הסוכן האוטונומי — עסקאות אחרונות</div>
+  <div id="trades-container">
+    <p class="empty">אין עסקאות עדיין — הסוכן מבצע אוטומטית המלצות שעברו את בדיקות הסיכון</p>
+  </div>
+
+  <div class="live-section-title"><span class="live-dot"></span> המלצות טכניות בזמן אמת</div>
   <div id="signals-container" class="signals-grid">
     <p class="empty">ממתין לסריקה הראשונה...</p>
+  </div>
+</div>
+
+<!-- ──────────────────────── Stock Screener ─────────────────────────────── -->
+<div id="view-screener">
+  <div class="screener-toolbar">
+    <input type="text" id="screener-search" placeholder="🔎 חיפוש לפי טיקר או שם..." oninput="renderScreener()">
+    <button class="market-filter-btn active" data-market="ALL" onclick="setMarketFilter(this)">הכל</button>
+    <button class="market-filter-btn" data-market="US" onclick="setMarketFilter(this)">🇺🇸 ארה"ב</button>
+    <button class="market-filter-btn" data-market="TASE" onclick="setMarketFilter(this)">🇮🇱 ת"א</button>
+    <span id="screener-status" style="font-size:11px;color:#475569;margin-right:auto"></span>
+    <button class="scan-btn" onclick="refreshScreener()">🔄 רענן נתונים</button>
+  </div>
+  <div class="screener-table-wrap">
+    <table class="screener-table" id="screener-table">
+      <thead><tr id="screener-head"></tr></thead>
+      <tbody id="screener-body">
+        <tr><td colspan="13"><p class="empty">טוען נתוני יסוד — עד דקה בטעינה ראשונה...</p></td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -348,8 +427,8 @@ document.querySelectorAll('.period-btn').forEach(btn => {
 });
 
 // ─── Tab switching ────────────────────────────────────────────────────────────
-const VIEWS = ['dashboard', 'trading', 'portfolio', 'performance', 'intelligence'];
-let tradingPollTimer = null, perfPollTimer = null;
+const VIEWS = ['dashboard', 'trading', 'screener', 'portfolio', 'performance', 'intelligence'];
+let tradingPollTimer = null, perfPollTimer = null, screenerPollTimer = null, portfolioPollTimer = null;
 
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b, i) => {
@@ -362,18 +441,29 @@ function switchTab(name) {
 
   clearInterval(tradingPollTimer); tradingPollTimer = null;
   clearInterval(perfPollTimer); perfPollTimer = null;
+  clearInterval(screenerPollTimer); screenerPollTimer = null;
+  clearInterval(portfolioPollTimer); portfolioPollTimer = null;
 
   if (name === 'trading') {
-    loadRecommendations();
-    tradingPollTimer = setInterval(loadRecommendations, 5000);
+    loadRecommendations(); loadTrades();
+    tradingPollTimer = setInterval(() => { loadRecommendations(); loadTrades(); }, 5000);
+  } else if (name === 'screener') {
+    loadScreener();
+    screenerPollTimer = setInterval(loadScreener, 60000);
   } else if (name === 'portfolio') {
     loadPortfolio();
+    portfolioPollTimer = setInterval(loadPortfolio, 15000);
   } else if (name === 'performance') {
     loadPerformance();
     perfPollTimer = setInterval(loadPerformance, 30000);
   } else if (name === 'intelligence') {
     loadIntelligence();
   }
+}
+
+function toggleReasoning(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
 }
 
 // ─── Recommendations (daily trading) ─────────────────────────────────────────
@@ -397,24 +487,196 @@ async function loadRecommendations() {
       container.innerHTML = '<p class="empty">לא נמצאו הזדמנויות בסריקה האחרונה</p>';
       return;
     }
-    container.innerHTML = data.signals.map(s => {
+    container.innerHTML = data.signals.map((s, i) => {
       const badges = (s.signal_types || []).map(badge).join(' ');
+      const marketTag = s.market ? `<span class="market-tag market-${s.market}">${s.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${s.market}</span>` : '';
       const detailLines = Object.entries(s.details || {}).map(([k,v]) => `<span style="color:#94a3b8">${k}:</span> ${v}`).join('<br>');
       const confLine = s.confidence !== undefined
         ? `<div style="font-size:12px;color:#94a3b8;margin-top:4px">ביטחון: <strong>${Math.round(s.confidence*100)}%</strong>${s.approved===false?' <span class="down">⚠️ נדחה בבדיקות סיכון</span>':''}</div>`
         : '';
+      const reasonId = `rec-reason-${i}`;
+      const reasonBlock = s.reasoning
+        ? `<button class="reasoning-toggle" onclick="toggleReasoning('${reasonId}')">🤖 למה ההחלטה הזו? ▾</button>
+           <div class="reasoning-panel" id="${reasonId}">${escapeHtml(s.reasoning)}</div>`
+        : '';
       return `<div class="signal-card score-${s.score}">
         <div class="card-header">
           <span class="card-ticker">${s.ticker}</span>
-          <span class="card-score">${SCORE_STARS[Math.min(s.score,5)]||s.score}</span>
+          <span>${marketTag} <span class="card-score">${SCORE_STARS[Math.min(s.score,5)]||s.score}</span></span>
         </div>
         <div>${badges}</div>
-        <div class="card-price">$${Number(s.price).toFixed(2)}</div>
+        <div class="card-price">${fmtMarketPrice(s.price, s.market)}</div>
         ${confLine}
         <div class="card-details">${detailLines}</div>
+        ${reasonBlock}
       </div>`;
     }).join('');
   } catch(e) {}
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// TASE quotes arrive in agorot (ILS/100); convert for display only
+function fmtMarketPrice(price, market) {
+  return market === 'TASE'
+    ? '₪' + (Number(price) / 100).toFixed(2)
+    : '$' + Number(price).toFixed(2);
+}
+
+// ─── Live trades feed ─────────────────────────────────────────────────────────
+async function loadTrades() {
+  try {
+    const res = await fetch('/api/trades');
+    const data = await res.json();
+    const el = document.getElementById('trades-container');
+    if (!data.trades || !data.trades.length) {
+      el.innerHTML = '<p class="empty">אין עסקאות עדיין — הסוכן מבצע אוטומטית המלצות שעברו את בדיקות הסיכון</p>';
+      return;
+    }
+    // Preserve open reasoning panels across refresh
+    const openPanels = new Set([...document.querySelectorAll('#trades-container .reasoning-panel.open')].map(p => p.id));
+    el.innerHTML = data.trades.slice(0, 15).map(t => {
+      const sideCls = t.side === 'buy' ? 'trade-side-buy' : 'trade-side-sell';
+      const sideTxt = t.side === 'buy' ? '▲ BUY' : '▼ SELL';
+      const statusCls = t.status === 'filled' ? 'filled' : 'rejected';
+      const marketTag = `<span class="market-tag market-${t.market||'US'}">${t.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${t.market||'US'}</span>`;
+      const reasonId = `trade-reason-${t.order_id}`;
+      const isOpen = openPanels.has(reasonId) ? ' open' : '';
+      return `<div class="trade-row ${statusCls}">
+        <div class="trade-head">
+          <span class="${sideCls}">${sideTxt}</span>
+          <strong>${t.symbol}</strong>
+          ${marketTag}
+          <span class="price">${t.quantity} × ${fmtMarketPrice(t.price, t.market)} = ${t.market === 'TASE' ? '₪' + (Number(t.value)/100).toLocaleString() : '$' + Number(t.value).toLocaleString()}</span>
+          <span class="metric-chip">ביטחון ${Math.round((t.confidence||0)*100)}%</span>
+          ${t.status === 'rejected' ? `<span class="down" style="font-size:11px">נדחה: ${t.reject_reason||''}</span>` : ''}
+          <span class="time">${fmt(t.ts)}</span>
+          <button class="reasoning-toggle" onclick="toggleReasoning('${reasonId}')">🤖 למה? ▾</button>
+        </div>
+        <div class="reasoning-panel${isOpen}" id="${reasonId}">${escapeHtml(t.reasoning||'')}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// ─── Stock screener ───────────────────────────────────────────────────────────
+let screenerRows = [];
+let screenerSort = { key: 'market_cap', dir: -1 };
+let marketFilter = 'ALL';
+
+const SCREENER_COLS = [
+  { key: 'symbol',               label: 'טיקר' },
+  { key: 'name',                 label: 'חברה' },
+  { key: 'market',               label: 'שוק' },
+  { key: 'price',                label: 'מחיר' },
+  { key: 'market_cap',           label: 'שווי שוק' },
+  { key: 'target_price',         label: 'מחיר יעד' },
+  { key: 'target_upside_pct',    label: 'אפסייד %' },
+  { key: 'dividend_yield_pct',   label: 'דיבידנד %' },
+  { key: 'roe_pct',              label: 'ROE %' },
+  { key: 'price_to_book',        label: 'מכפיל הון' },
+  { key: 'beta',                 label: 'בטא' },
+  { key: 'risk_level',           label: 'רמת סיכון' },
+  { key: 'fees',                 label: 'עמלות (קנייה+מכירה)' },
+];
+
+const RISK_ORDER = { low: 0, medium: 1, high: 2, unknown: 3 };
+const RISK_LABELS = { low: 'נמוך', medium: 'בינוני', high: 'גבוה', unknown: '—' };
+
+function fmtMarketCap(v) {
+  if (v == null) return '—';
+  if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9)  return (v/1e9).toFixed(1) + 'B';
+  if (v >= 1e6)  return (v/1e6).toFixed(0) + 'M';
+  return Number(v).toLocaleString();
+}
+
+function setMarketFilter(btn) {
+  document.querySelectorAll('.market-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  marketFilter = btn.dataset.market;
+  renderScreener();
+}
+
+function sortScreener(key) {
+  if (screenerSort.key === key) screenerSort.dir *= -1;
+  else screenerSort = { key, dir: -1 };
+  renderScreener();
+}
+
+async function loadScreener() {
+  try {
+    const res = await fetch('/api/screener');
+    const data = await res.json();
+    screenerRows = data.rows || [];
+    const status = document.getElementById('screener-status');
+    if (data.running) status.textContent = '⟳ מרענן נתונים...';
+    else if (data.last_refresh) status.textContent = `עודכן ${fmtRelTime(data.last_refresh)} · ${screenerRows.length} מניות`;
+    renderScreener();
+  } catch(e) {}
+}
+
+async function refreshScreener() {
+  await fetch('/api/screener/refresh', { method: 'POST' });
+  document.getElementById('screener-status').textContent = '⟳ מרענן נתונים...';
+  setTimeout(loadScreener, 3000);
+}
+
+function renderScreener() {
+  const head = document.getElementById('screener-head');
+  head.innerHTML = SCREENER_COLS.map(c => {
+    const arrow = screenerSort.key === c.key ? `<span class="sort-arrow">${screenerSort.dir < 0 ? '▼' : '▲'}</span>` : '';
+    return `<th onclick="sortScreener('${c.key}')">${arrow}${c.label}</th>`;
+  }).join('');
+
+  const q = (document.getElementById('screener-search').value || '').toUpperCase();
+  let rows = screenerRows.filter(r =>
+    (marketFilter === 'ALL' || r.market === marketFilter) &&
+    (!q || r.symbol.toUpperCase().includes(q) || (r.name||'').toUpperCase().includes(q))
+  );
+
+  const { key, dir } = screenerSort;
+  rows.sort((a, b) => {
+    let va = a[key], vb = b[key];
+    if (key === 'risk_level') { va = RISK_ORDER[va] ?? 9; vb = RISK_ORDER[vb] ?? 9; }
+    if (key === 'fees') { va = a.fees ? a.fees.round_trip : null; vb = b.fees ? b.fees.round_trip : null; }
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    if (typeof va === 'string') return va.localeCompare(vb) * -dir;
+    return (va - vb) * dir;
+  });
+
+  const body = document.getElementById('screener-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="13"><p class="empty">אין תוצאות</p></td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(r => {
+    const cur = r.market === 'TASE' ? '₪' : '$';
+    const upside = r.target_upside_pct;
+    const upsideHtml = upside == null ? '—'
+      : `<span class="${upside >= 0 ? 'up' : 'down'}">${upside >= 0 ? '+' : ''}${upside}%</span>`;
+    const feeHtml = r.fees
+      ? `${r.fees.round_trip} ${r.fees.currency === 'ILS' ? '₪' : '$'}`
+      : '—';
+    return `<tr>
+      <td><strong>${r.symbol}</strong></td>
+      <td style="color:#94a3b8">${r.name || '—'}</td>
+      <td><span class="market-tag market-${r.market}">${r.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${r.market}</span></td>
+      <td class="price">${r.price != null ? cur + r.price : '—'}</td>
+      <td>${fmtMarketCap(r.market_cap)}</td>
+      <td class="price">${r.target_price != null ? cur + r.target_price : '—'}</td>
+      <td>${upsideHtml}</td>
+      <td>${r.dividend_yield_pct != null ? r.dividend_yield_pct + '%' : '—'}</td>
+      <td>${r.roe_pct != null ? `<span class="${r.roe_pct >= 0 ? 'up' : 'down'}">${r.roe_pct}%</span>` : '—'}</td>
+      <td>${r.price_to_book != null ? r.price_to_book : '—'}</td>
+      <td>${r.beta != null ? r.beta : '—'}</td>
+      <td><span class="risk-tag risk-${r.risk_level}">${RISK_LABELS[r.risk_level] || r.risk_level}</span></td>
+      <td style="font-size:11px;color:#94a3b8">${feeHtml}</td>
+    </tr>`;
+  }).join('');
 }
 
 async function triggerScan() {

@@ -2,11 +2,19 @@
 import os
 from dataclasses import dataclass, field
 
-DEFAULT_WATCHLIST = (
+DEFAULT_US_WATCHLIST = (
     "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "GOOGL", "AMD",
     "SMCI", "PLTR", "MSTR", "COIN", "HOOD", "RIVN", "LCID",
     "SPY", "QQQ", "IWM",
 )
+
+# TASE listings use yfinance's .TA suffix; prices arrive in agorot (ILA).
+DEFAULT_TASE_WATCHLIST = (
+    "TEVA.TA", "NICE.TA", "ESLT.TA", "ICL.TA",
+    "LUMI.TA", "POLI.TA", "DSCT.TA", "MZTF.TA",
+)
+
+DEFAULT_WATCHLIST = DEFAULT_US_WATCHLIST + DEFAULT_TASE_WATCHLIST
 
 DEFAULT_STRATEGY_PARAMS: dict[str, float] = {
     "breakout_volume_ratio": 2.0,
@@ -32,6 +40,16 @@ DEFAULT_RISK_PARAMS: dict[str, float] = {
     "paper_starting_cash": 100_000.0,
 }
 
+DEFAULT_FEE_PARAMS: dict[str, float] = {
+    # US brokers (IBKR-style): cents per share, with a floor and a value cap
+    "us_fee_per_share": 0.01,
+    "us_fee_min": 1.0,
+    "us_fee_max_pct_of_value": 0.01,   # fee never exceeds 1% of trade value
+    # Israeli brokers: percentage of trade value with a minimum floor (ILS)
+    "tase_fee_pct": 0.0008,            # 0.08%
+    "tase_fee_min": 3.0,
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -41,6 +59,10 @@ class Settings:
     scan_interval_minutes: int = 15
     strategy_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_STRATEGY_PARAMS))
     risk_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_RISK_PARAMS))
+    fee_params: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_FEE_PARAMS))
+    # Autonomous execution stays paper-only (ADR-5): the broker wired in
+    # bootstrap is PaperBroker; this flag never enables live trading.
+    auto_execute_paper: bool = True
     data_dir: str = "data"
 
     def __post_init__(self) -> None:
@@ -61,5 +83,6 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             watchlist=watchlist,
             scan_interval_minutes=int(os.getenv("SCAN_INTERVAL_MINUTES", "15")),
+            auto_execute_paper=os.getenv("AUTO_EXECUTE_PAPER", "true").lower() in ("1", "true", "yes"),
             data_dir=os.getenv("DATA_DIR", "data"),
         )

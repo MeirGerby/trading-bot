@@ -20,7 +20,7 @@ from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
 from trading_platform.application.services.self_critique_engine import SelfCritiqueEngine
-from trading_platform.bootstrap import build_scan_service
+from trading_platform.bootstrap import build_scan_service, build_screener_service
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,32 @@ _tracker: PerformanceTracker | None = getattr(_scan_service, "_tracker", None)
 _meta: MetaDecisionEngine | None = getattr(_scan_service, "_meta", None)
 _learning: LearningEngine | None = getattr(_scan_service, "_learning", None)
 _critique: SelfCritiqueEngine | None = getattr(_scan_service, "_critique", None)
+
+_screener_service = build_screener_service()
+_screener_cache: dict = {"rows": [], "ts": 0.0, "running": False}
+_SCREENER_INTERVAL = 600  # fundamentals are slow + heavily cached; 10 min is plenty
+
+
+def _run_screener() -> None:
+    _screener_cache["running"] = True
+    try:
+        result = _screener_service.build_rows()
+        _screener_cache["rows"] = result["rows"]
+        _screener_cache["ts"] = time_mod.time()
+    except Exception:
+        logger.exception("screener refresh failed")
+    finally:
+        _screener_cache["running"] = False
+
+
+def _screener_loop() -> None:
+    time_mod.sleep(10)
+    while True:
+        _run_screener()
+        time_mod.sleep(_SCREENER_INTERVAL)
+
+
+threading.Thread(target=_screener_loop, daemon=True).start()
 
 
 def _load_persisted_results() -> None:
@@ -319,6 +345,32 @@ def get_learning():
         result["recent_critiques"] = []
 
     return JSONResponse(result)
+
+
+@app.get("/api/screener")
+def get_screener():
+    return JSONResponse({
+        "rows": _screener_cache["rows"],
+        "last_refresh": _screener_cache["ts"],
+        "running": _screener_cache["running"],
+    })
+
+
+@app.post("/api/screener/refresh")
+def refresh_screener():
+    if _screener_cache["running"]:
+        return JSONResponse({"status": "already_running"})
+    threading.Thread(target=_run_screener, daemon=True).start()
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/api/trades")
+def get_trades():
+    try:
+        trades = _scan_service.recent_trades(50)
+    except Exception:
+        trades = []
+    return JSONResponse({"trades": trades})
 
 
 @app.get("/api/audit")

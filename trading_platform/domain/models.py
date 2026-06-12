@@ -5,10 +5,13 @@ from datetime import datetime, timezone
 from trading_platform.domain.enums import (
     AssetClass,
     Direction,
+    Market,
     OptionType,
     OrderSide,
     OrderStatus,
+    RiskLevel,
     SignalType,
+    market_for_symbol,
 )
 
 
@@ -25,6 +28,10 @@ class Instrument:
     def __post_init__(self) -> None:
         if not self.symbol or not self.symbol.isupper():
             raise ValueError(f"symbol must be non-empty uppercase, got {self.symbol!r}")
+
+    @property
+    def market(self) -> Market:
+        return market_for_symbol(self.symbol)
 
 
 @dataclass(frozen=True)
@@ -142,6 +149,38 @@ class OptionContract:
     @property
     def vol_oi_ratio(self) -> float:
         return self.volume / self.open_interest if self.open_interest > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class FundamentalData:
+    """Per-company fundamentals as supplied by the data vendor.
+
+    None means the vendor doesn't report that metric for this company —
+    common for TASE listings and ETFs.
+    """
+    symbol: str
+    name: str = ""
+    market_cap: float | None = None
+    target_price: float | None = None      # consensus analyst target
+    dividend_yield: float | None = None    # fraction, e.g. 0.012 = 1.2%
+    roe: float | None = None               # return on equity, fraction
+    price_to_book: float | None = None
+    beta: float | None = None
+    currency: str = "USD"
+
+    @property
+    def market(self) -> Market:
+        return market_for_symbol(self.symbol)
+
+
+@dataclass(frozen=True)
+class RiskMetrics:
+    """Volatility/drawdown statistics derived from price history."""
+    symbol: str
+    annual_volatility: float | None = None   # std of daily returns * sqrt(252)
+    max_drawdown: float | None = None        # fraction, e.g. 0.30 = 30%
+    beta: float | None = None
+    level: RiskLevel = RiskLevel.UNKNOWN
 
 
 @dataclass(frozen=True)

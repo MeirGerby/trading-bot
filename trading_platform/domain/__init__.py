@@ -1,14 +1,18 @@
 from trading_platform.domain.enums import (
     AssetClass,
     Direction,
+    Market,
     OptionType,
     OrderSide,
     OrderStatus,
+    RiskLevel,
     SignalType,
+    market_for_symbol,
 )
 from trading_platform.domain.models import (
     Bar,
     FeedbackEvent,
+    FundamentalData,
     Instrument,
     OptionContract,
     Order,
@@ -16,6 +20,7 @@ from trading_platform.domain.models import (
     Position,
     Recommendation,
     RiskCheckResult,
+    RiskMetrics,
     Signal,
 )
 
@@ -24,7 +29,9 @@ __all__ = [
     "Bar",
     "Direction",
     "FeedbackEvent",
+    "FundamentalData",
     "Instrument",
+    "Market",
     "OptionContract",
     "OptionType",
     "Order",
@@ -34,6 +41,9 @@ __all__ = [
     "Position",
     "Recommendation",
     "RiskCheckResult",
+    "RiskLevel",
+    "RiskMetrics",
     "Signal",
     "SignalType",
+    "market_for_symbol",
 ]

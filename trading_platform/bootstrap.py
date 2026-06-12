@@ -8,11 +8,13 @@ from pathlib import Path
 
 from trading_platform.application.services import (
     DecisionEngine,
+    FeeCalculator,
     LearningEngine,
     MetaDecisionEngine,
     PerformanceTracker,
     PortfolioEngine,
     ScanService,
+    ScreenerService,
     SelfCritiqueEngine,
 )
 from trading_platform.application.services.risk_engine import default_risk_engine
@@ -25,10 +27,21 @@ from trading_platform.application.strategies import (
 )
 from trading_platform.config import Settings
 from trading_platform.infrastructure.audit import JsonlAuditLog
+from trading_platform.infrastructure.fundamentals_data import YFinanceFundamentals
 from trading_platform.infrastructure.market_data import YFinanceMarketData
 from trading_platform.infrastructure.memory_store import JsonMemoryStore
 from trading_platform.infrastructure.options_data import YFinanceOptionsData
 from trading_platform.infrastructure.paper_broker import PaperBroker
+
+# Shared market-data adapter so the screener reuses the scan loop's bar cache
+_shared_market_data: YFinanceMarketData | None = None
+
+
+def _get_market_data() -> YFinanceMarketData:
+    global _shared_market_data
+    if _shared_market_data is None:
+        _shared_market_data = YFinanceMarketData()
+    return _shared_market_data
 
 
 def build_scan_service(settings: Settings | None = None,
@@ -37,7 +50,7 @@ def build_scan_service(settings: Settings | None = None,
     data_dir = Path(base_dir) if base_dir else Path(os.path.dirname(__file__)).parent / settings.data_dir
 
     memory = JsonMemoryStore(data_dir)
-    market_data = YFinanceMarketData()
+    market_data = _get_market_data()
     options_data = YFinanceOptionsData()
 
     tracker = PerformanceTracker(memory, market_data)
@@ -62,4 +75,15 @@ def build_scan_service(settings: Settings | None = None,
         meta_decision_engine=MetaDecisionEngine(tracker),
         learning_engine=LearningEngine(memory),
         self_critique_engine=SelfCritiqueEngine(memory),
+        auto_execute=settings.auto_execute_paper,  # paper broker only (ADR-5)
+    )
+
+
+def build_screener_service(settings: Settings | None = None) -> ScreenerService:
+    settings = settings or Settings.from_env()
+    return ScreenerService(
+        watchlist=settings.watchlist,
+        market_data=_get_market_data(),
+        fundamentals=YFinanceFundamentals(),
+        fee_calculator=FeeCalculator(settings.fee_params),
     )

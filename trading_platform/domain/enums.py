@@ -33,3 +33,20 @@ class OrderSide(str, Enum):
 class OrderStatus(str, Enum):
     FILLED = "filled"
     REJECTED = "rejected"
+
+
+class Market(str, Enum):
+    US = "US"        # NYSE / NASDAQ
+    TASE = "TASE"    # Tel Aviv Stock Exchange
+
+
+class RiskLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    UNKNOWN = "unknown"
+
+
+def market_for_symbol(symbol: str) -> Market:
+    """TASE tickers carry yfinance's .TA suffix; everything else is US."""
+    return Market.TASE if symbol.upper().endswith(".TA") else Market.US

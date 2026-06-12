@@ -43,6 +43,47 @@ logger = logging.getLogger(__name__)
 
 SCAN_RESULTS_KEY = "scan_results"
 WEIGHTS_KEY = "weights"
+TRADE_LOG_KEY = "trade_log"
+MAX_TRADE_LOG = 200
+
+
+def build_reasoning(rec: Recommendation) -> str:
+    """Human-readable 'why this decision' text for the explainability panel.
+
+    Composed entirely from data already on the Recommendation, so it is
+    always in sync with what the engines actually decided.
+    """
+    lines: list[str] = []
+    direction = "BUY" if rec.direction.value == "long" else "SELL"
+    lines.append(
+        f"{direction} {rec.instrument.symbol} @ {rec.price:.2f} "
+        f"({rec.instrument.market.value}) — confidence {rec.confidence:.0%}"
+    )
+
+    for sig in rec.signals:
+        detail = ", ".join(f"{k}={v}" for k, v in sig.details.items())
+        lines.append(
+            f"• {sig.signal_type.value}: strength {sig.strength:.2f}"
+            + (f" ({detail})" if detail else "")
+        )
+
+    lines.append(f"• Decision logic: {rec.rationale}")
+
+    if rec.proposed_quantity > 0:
+        lines.append(
+            f"• Position sizing: {rec.proposed_quantity:g} shares ≈ "
+            f"{rec.proposed_quantity * rec.price:,.0f} "
+            f"(equity × base allocation × confidence)"
+        )
+
+    if rec.risk_checks:
+        passed = [c for c in rec.risk_checks if c.passed]
+        failed = [c for c in rec.risk_checks if not c.passed]
+        lines.append(f"• Risk review: {len(passed)}/{len(rec.risk_checks)} checks passed")
+        for c in failed:
+            lines.append(f"  ✗ {c.rule_name}: {c.reason}")
+
+    return "\n".join(lines)
 
 
 def recommendation_to_dict(rec: Recommendation) -> dict:
@@ -53,6 +94,7 @@ def recommendation_to_dict(rec: Recommendation) -> dict:
         details.update(sig.details)
     return {
         "ticker": rec.instrument.symbol,
+        "market": rec.instrument.market.value,
         "score": rec.score,
         "signal_types": [t.value for t in sorted({s.signal_type for s in rec.signals},
                                                  key=lambda t: t.value)],
@@ -60,6 +102,7 @@ def recommendation_to_dict(rec: Recommendation) -> dict:
         "details": details,
         "confidence": round(rec.confidence, 3),
         "rationale": rec.rationale,
+        "reasoning": build_reasoning(rec),
         "proposed_quantity": rec.proposed_quantity,
         "approved": rec.approved,
         "risk_checks": [
@@ -91,7 +134,8 @@ class ScanService:
                  performance_tracker: PerformanceTracker | None = None,
                  meta_decision_engine: MetaDecisionEngine | None = None,
                  learning_engine: LearningEngine | None = None,
-                 self_critique_engine: SelfCritiqueEngine | None = None):
+                 self_critique_engine: SelfCritiqueEngine | None = None,
+                 auto_execute: bool = False):
         self._settings = settings
         self._strategies = strategies
         self._memory = memory
@@ -105,6 +149,9 @@ class ScanService:
         self._meta = meta_decision_engine
         self._learning = learning_engine
         self._critique = self_critique_engine
+        # Auto-execution acts only through the injected broker, which is
+        # PaperBroker in bootstrap (ADR-5: live trading needs owner approval).
+        self._auto_execute = auto_execute
 
     def current_params(self) -> dict[str, float]:
         merged = dict(self._settings.strategy_params)
@@ -168,6 +215,16 @@ class ScanService:
             if not rec.approved:
                 failed = [c.rule_name for c in rec.risk_checks if not c.passed]
                 self._audit.record("risk_rejected", {"ticker": symbol, "rules": failed})
+
+            # Autonomous paper execution: approved + sized + not already held
+            if (self._auto_execute and rec.approved and rec.proposed_quantity > 0
+                    and not any(p.instrument.symbol == symbol for p in portfolio.positions)):
+                try:
+                    order = self.execute(rec)
+                    self._log_trade(order, rec)
+                    portfolio = self._broker.get_portfolio()  # refresh cash for next risk checks
+                except Exception:
+                    logger.exception("auto-execute failed for %s", symbol)
 
         recommendations.sort(key=lambda r: (r.score, r.confidence), reverse=True)
         finished = datetime.now(timezone.utc)
@@ -235,6 +292,32 @@ class ScanService:
     def last_scan_results(self) -> dict:
         """Persisted results of the most recent scan (survives restarts)."""
         return self._memory.load(SCAN_RESULTS_KEY, {"timestamp": "", "recommendations": []})
+
+    def recent_trades(self, n: int = 50) -> list[dict]:
+        """Most recent autonomous (paper) executions, newest first."""
+        trades = self._memory.load(TRADE_LOG_KEY, {"trades": []})["trades"]
+        return list(reversed(trades[-n:]))
+
+    def _log_trade(self, order: Order, rec: Recommendation) -> None:
+        store = self._memory.load(TRADE_LOG_KEY, {"trades": []})
+        store["trades"].append({
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "order_id": order.id,
+            "symbol": order.symbol,
+            "market": rec.instrument.market.value,
+            "side": order.side.value,
+            "quantity": order.quantity,
+            "price": order.price,
+            "value": round(order.quantity * order.price, 2),
+            "status": order.status.value,
+            "reject_reason": order.reason,
+            "confidence": round(rec.confidence, 3),
+            "signal_types": [t.value for t in sorted({s.signal_type for s in rec.signals},
+                                                     key=lambda t: t.value)],
+            "reasoning": build_reasoning(rec),
+        })
+        store["trades"] = store["trades"][-MAX_TRADE_LOG:]
+        self._memory.save(TRADE_LOG_KEY, store)
 
     def execute(self, rec: Recommendation) -> Order:
         """Execute an approved recommendation on the (paper) broker."""
