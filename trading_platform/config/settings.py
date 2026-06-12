@@ -15,6 +15,12 @@ DEFAULT_STRATEGY_PARAMS: dict[str, float] = {
     "momentum_price_above_ma": 20,
     "options_vol_oi_ratio": 2.0,
     "options_iv_percentile_min": 30,
+    "mean_reversion_ma_period": 20,
+    "mean_reversion_rsi_max": 35.0,
+    "mean_reversion_pct_below_ma": 0.03,
+    "trend_fast_ma": 20,
+    "trend_slow_ma": 50,
+    "trend_rsi_min": 50.0,
     "min_score_to_alert": 2,
 }
 

@@ -92,6 +92,94 @@ class MomentumStrategy:
         )
 
 
+class MeanReversionStrategy:
+    """Price pulled far below moving average (oversold bounce setup)."""
+
+    name = "mean_reversion"
+
+    def __init__(self, market_data: MarketDataPort):
+        self._market_data = market_data
+
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None:
+        ma_period = int(params.get("mean_reversion_ma_period", 20))
+        rsi_max = params.get("mean_reversion_rsi_max", 35.0)
+        pct_below_ma = params.get("mean_reversion_pct_below_ma", 0.03)
+
+        bars = self._market_data.get_daily_bars(instrument.symbol, max(ma_period + 2, 32))
+        closes = [b.close for b in bars]
+        if len(closes) < ma_period + 1:
+            return None
+
+        current_price = closes[-1]
+        current_ma = sma(closes, ma_period)
+        current_rsi = rsi(closes)
+        if current_ma is None or current_rsi is None or current_ma <= 0:
+            return None
+
+        deviation = (current_ma - current_price) / current_ma
+        if deviation < pct_below_ma or current_rsi > rsi_max:
+            return None
+
+        strength = _clamp(deviation / 0.10)  # full strength at 10% below MA
+        return Signal(
+            instrument=instrument,
+            signal_type=SignalType.MEAN_REVERSION,
+            strength=strength,
+            details={
+                "RSI": f"{current_rsi:.1f}",
+                f"MA{ma_period}": f"{current_ma:.2f}",
+                "pct_below_ma": f"{deviation * 100:.1f}%",
+            },
+        )
+
+
+class TrendFollowingStrategy:
+    """Golden cross: faster MA crosses above slower MA with price confirmation."""
+
+    name = "trend_following"
+
+    def __init__(self, market_data: MarketDataPort):
+        self._market_data = market_data
+
+    def evaluate(self, instrument: Instrument, params: dict[str, float]) -> Signal | None:
+        fast_period = int(params.get("trend_fast_ma", 20))
+        slow_period = int(params.get("trend_slow_ma", 50))
+        rsi_min = params.get("trend_rsi_min", 50.0)
+
+        bars = self._market_data.get_daily_bars(instrument.symbol, slow_period + 5)
+        closes = [b.close for b in bars]
+        if len(closes) < slow_period + 2:
+            return None
+
+        fast_ma = sma(closes, fast_period)
+        slow_ma = sma(closes, slow_period)
+        prev_fast = sma(closes[:-1], fast_period)
+        prev_slow = sma(closes[:-1], slow_period)
+        current_rsi = rsi(closes)
+
+        if any(v is None for v in [fast_ma, slow_ma, prev_fast, prev_slow, current_rsi]):
+            return None
+
+        # Require crossover: fast just crossed above slow
+        crossed = prev_fast <= prev_slow and fast_ma > slow_ma  # type: ignore[operator]
+        if not crossed or current_rsi < rsi_min:
+            return None
+
+        spread = (fast_ma - slow_ma) / slow_ma  # type: ignore[operator]
+        strength = _clamp(spread / 0.02)  # full strength at 2% spread
+        return Signal(
+            instrument=instrument,
+            signal_type=SignalType.TREND_FOLLOWING,
+            strength=strength,
+            details={
+                f"MA{fast_period}": f"{fast_ma:.2f}",
+                f"MA{slow_period}": f"{slow_ma:.2f}",
+                "RSI": f"{current_rsi:.1f}",
+                "spread": f"{spread * 100:.2f}%",
+            },
+        )
+
+
 class OptionsFlowStrategy:
     """Unusual options activity: volume far above open interest."""
 

@@ -27,8 +27,15 @@ from trading_platform.application.ports import (
     Strategy,
 )
 from trading_platform.application.services.decision_engine import DecisionEngine
+from trading_platform.application.services.learning_engine import LearningEngine
+from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
+from trading_platform.application.services.performance_tracker import PerformanceTracker
 from trading_platform.application.services.portfolio_engine import PortfolioEngine
 from trading_platform.application.services.risk_engine import RiskEngine
+from trading_platform.application.services.self_critique_engine import (
+    ScanSummary,
+    SelfCritiqueEngine,
+)
 from trading_platform.config import Settings
 from trading_platform.domain import Instrument, Order, OrderSide, Recommendation, Signal
 
@@ -80,7 +87,11 @@ class ScanService:
     def __init__(self, settings: Settings, strategies: tuple[Strategy, ...],
                  memory: MemoryStore, market_data: MarketDataPort,
                  decision_engine: DecisionEngine, portfolio_engine: PortfolioEngine,
-                 risk_engine: RiskEngine, broker: BrokerPort, audit: AuditLogPort):
+                 risk_engine: RiskEngine, broker: BrokerPort, audit: AuditLogPort,
+                 performance_tracker: PerformanceTracker | None = None,
+                 meta_decision_engine: MetaDecisionEngine | None = None,
+                 learning_engine: LearningEngine | None = None,
+                 self_critique_engine: SelfCritiqueEngine | None = None):
         self._settings = settings
         self._strategies = strategies
         self._memory = memory
@@ -90,6 +101,10 @@ class ScanService:
         self._risk = risk_engine
         self._broker = broker
         self._audit = audit
+        self._tracker = performance_tracker
+        self._meta = meta_decision_engine
+        self._learning = learning_engine
+        self._critique = self_critique_engine
 
     def current_params(self) -> dict[str, float]:
         merged = dict(self._settings.strategy_params)
@@ -101,6 +116,14 @@ class ScanService:
         params = self.current_params()
         portfolio = self._broker.get_portfolio()
         self._audit.record("scan_started", {"symbols": len(self._settings.watchlist)})
+
+        # Evaluate pending outcomes before generating new recommendations
+        new_outcomes = []
+        if self._tracker is not None:
+            try:
+                new_outcomes = self._tracker.update_outcomes()
+            except Exception:
+                logger.exception("performance tracker update_outcomes failed")
 
         recommendations: list[Recommendation] = []
         errors: list[str] = []
@@ -128,6 +151,14 @@ class ScanService:
                 continue
 
             rec = self._decision.build(instrument, tuple(signals), price)
+
+            # Meta decision: adjust confidence by strategy competition ranking
+            if self._meta is not None:
+                try:
+                    rec = self._meta.adjust(rec)
+                except Exception:
+                    logger.exception("meta decision engine adjust failed for %s", symbol)
+
             quantity = self._portfolio.propose_quantity(portfolio, price, rec.confidence)
             rec = replace(rec, proposed_quantity=quantity)
             rec = self._risk.review(rec, portfolio)
@@ -151,13 +182,55 @@ class ScanService:
             "duration_seconds": round((finished - started).total_seconds(), 2),
         })
 
-        return ScanReport(
+        report = ScanReport(
             recommendations=tuple(recommendations),
             started_at=started,
             finished_at=finished,
             symbols_scanned=len(self._settings.watchlist),
             errors=tuple(errors),
         )
+
+        # Register new recommendations for future outcome tracking
+        if self._tracker is not None:
+            try:
+                self._tracker.register(list(recommendations))
+            except Exception:
+                logger.exception("performance tracker register failed")
+
+        # Extract lessons from newly completed outcomes
+        if self._learning is not None and new_outcomes:
+            try:
+                strategy_perf = (
+                    self._tracker.get_strategy_performance()
+                    if self._tracker else {}
+                )
+                lessons = self._learning.extract_lessons(new_outcomes, strategy_perf)
+                if lessons:
+                    self._audit.record("lessons_extracted", {"count": len(lessons)})
+            except Exception:
+                logger.exception("learning engine extract_lessons failed")
+
+        # Post-cycle self-critique
+        if self._critique is not None:
+            try:
+                strategy_perf = (
+                    self._tracker.get_strategy_performance()
+                    if self._tracker else {}
+                )
+                summary = ScanSummary(
+                    symbols_scanned=report.symbols_scanned,
+                    recommendations_count=len(report.recommendations),
+                    errors_count=len(report.errors),
+                    error_symbols=tuple(
+                        e.split(":")[0].strip() for e in report.errors
+                    ),
+                    duration_seconds=report.duration_seconds,
+                )
+                self._critique.critique(summary, new_outcomes, strategy_perf)
+            except Exception:
+                logger.exception("self critique engine failed")
+
+        return report
 
     def last_scan_results(self) -> dict:
         """Persisted results of the most recent scan (survives restarts)."""

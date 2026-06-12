@@ -5,6 +5,8 @@ class SignalType(str, Enum):
     BREAKOUT = "breakout"
     MOMENTUM = "momentum"
     OPTIONS_FLOW = "options"
+    MEAN_REVERSION = "mean_reversion"
+    TREND_FOLLOWING = "trend_following"
 
 
 class Direction(str, Enum):

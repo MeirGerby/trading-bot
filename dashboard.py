@@ -16,6 +16,10 @@ from fastapi.responses import FileResponse, JSONResponse
 
 import config
 from trading_platform.application.services import recommendation_to_dict
+from trading_platform.application.services.learning_engine import LearningEngine
+from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
+from trading_platform.application.services.performance_tracker import PerformanceTracker
+from trading_platform.application.services.self_critique_engine import SelfCritiqueEngine
 from trading_platform.bootstrap import build_scan_service
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,12 @@ _CHART_CACHE_TTL = 300  # 5 minutes
 _scan_service = build_scan_service()
 _scan_cache: dict = {"signals": [], "ts": 0.0, "running": False, "next_scan": 0.0}
 _SCAN_INTERVAL = 300  # 5 minutes
+
+# Intelligence layer helpers (wired from the scan_service internals)
+_tracker: PerformanceTracker | None = getattr(_scan_service, "_tracker", None)
+_meta: MetaDecisionEngine | None = getattr(_scan_service, "_meta", None)
+_learning: LearningEngine | None = getattr(_scan_service, "_learning", None)
+_critique: SelfCritiqueEngine | None = getattr(_scan_service, "_critique", None)
 
 
 def _load_persisted_results() -> None:
@@ -192,4 +202,133 @@ def trigger_scan():
         return JSONResponse({"status": "already_running"})
     threading.Thread(target=_run_scan, daemon=True).start()
     return JSONResponse({"status": "started"})
+
+
+@app.get("/api/portfolio")
+def get_portfolio():
+    broker = getattr(_scan_service, "_broker", None)
+    if broker is None:
+        return JSONResponse({"error": "broker not available"}, status_code=503)
+    try:
+        state = broker.get_portfolio()
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    positions = []
+    for pos in state.positions:
+        current_price = _scan_service._market_data.get_last_price(pos.instrument.symbol)
+        market_value = (current_price or pos.avg_entry_price) * pos.quantity
+        unrealized_pnl = (
+            (current_price - pos.avg_entry_price) * pos.quantity
+            if current_price else 0.0
+        )
+        positions.append({
+            "symbol": pos.instrument.symbol,
+            "quantity": pos.quantity,
+            "avg_entry_price": round(pos.avg_entry_price, 4),
+            "current_price": round(current_price, 4) if current_price else None,
+            "market_value": round(market_value, 2),
+            "cost_basis": round(pos.cost_basis, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round(
+                (current_price / pos.avg_entry_price - 1) * 100
+                if current_price and pos.avg_entry_price > 0 else 0.0, 2
+            ),
+        })
+
+    total_market_value = sum(p["market_value"] for p in positions)
+    total_cost_basis = sum(p["cost_basis"] for p in positions)
+    total_unrealized_pnl = sum(p["unrealized_pnl"] for p in positions)
+    total_equity = state.cash + total_market_value
+
+    return JSONResponse({
+        "cash": round(state.cash, 2),
+        "total_market_value": round(total_market_value, 2),
+        "total_equity": round(total_equity, 2),
+        "total_cost_basis": round(total_cost_basis, 2),
+        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+        "total_unrealized_pnl_pct": round(
+            total_unrealized_pnl / total_cost_basis * 100
+            if total_cost_basis > 0 else 0.0, 2
+        ),
+        "positions": sorted(positions, key=lambda p: -abs(p["market_value"])),
+    })
+
+
+@app.get("/api/performance")
+def get_performance():
+    if _tracker is None:
+        return JSONResponse({"error": "performance tracker not available"}, status_code=503)
+    try:
+        summary = _tracker.get_summary_dict()
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    leaderboard = []
+    if _meta is not None:
+        try:
+            leaderboard = _meta.leaderboard()
+        except Exception:
+            pass
+
+    recent_outcomes = []
+    try:
+        all_outcomes = _tracker.get_all_outcomes()
+        recent_outcomes = list(reversed(all_outcomes[-20:]))
+    except Exception:
+        pass
+
+    signal_win_rates = {}
+    if _learning is not None:
+        try:
+            signal_win_rates = _learning.get_signal_win_rates()
+        except Exception:
+            pass
+
+    return JSONResponse({
+        **summary,
+        "leaderboard": leaderboard,
+        "recent_outcomes": recent_outcomes,
+        "signal_combinations": signal_win_rates,
+    })
+
+
+@app.get("/api/learning")
+def get_learning():
+    result: dict = {}
+
+    if _learning is not None:
+        try:
+            result["recent_lessons"] = _learning.get_recent_lessons(20)
+        except Exception:
+            result["recent_lessons"] = []
+        try:
+            result["signal_win_rates"] = _learning.get_signal_win_rates()
+        except Exception:
+            result["signal_win_rates"] = {}
+    else:
+        result["recent_lessons"] = []
+        result["signal_win_rates"] = {}
+
+    if _critique is not None:
+        try:
+            result["recent_critiques"] = _critique.get_recent_critiques(5)
+        except Exception:
+            result["recent_critiques"] = []
+    else:
+        result["recent_critiques"] = []
+
+    return JSONResponse(result)
+
+
+@app.get("/api/audit")
+def get_audit():
+    audit = getattr(_scan_service, "_audit", None)
+    if audit is None:
+        return JSONResponse({"events": []})
+    try:
+        events = audit.tail(50)
+    except Exception:
+        events = []
+    return JSONResponse({"events": events})
 

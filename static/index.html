@@ -9,7 +9,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f1117; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; font-size: 14px; padding: 20px; }
   h1 { font-size: 20px; margin-bottom: 4px; color: #f8fafc; }
-  .subtitle { color: #64748b; font-size: 12px; margin-bottom: 24px; }
+  .subtitle { color: #64748b; font-size: 12px; margin-bottom: 20px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .card { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; }
   .card.full { grid-column: 1 / -1; }
@@ -22,6 +22,8 @@
   .b-breakout { background: #1e3a5f; color: #60a5fa; }
   .b-momentum { background: #1a3a2a; color: #4ade80; }
   .b-options  { background: #3a2a1a; color: #fb923c; }
+  .b-mean_reversion { background: #2a1a3a; color: #c084fc; }
+  .b-trend_following { background: #1a2a3a; color: #38bdf8; }
   .score { font-weight: 700; color: #f8fafc; }
   .price { color: #a3e635; font-family: monospace; }
   .time { color: #475569; font-size: 12px; }
@@ -37,14 +39,16 @@
   .empty { color: #475569; font-size: 13px; text-align: center; padding: 20px 0; }
 
   /* Tabs */
-  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
   .tab-btn { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; color: #64748b;
-    padding: 8px 20px; font-size: 14px; cursor: pointer; transition: all .15s; }
+    padding: 7px 16px; font-size: 13px; cursor: pointer; transition: all .15s; }
   .tab-btn.active { background: #2d3148; color: #f8fafc; border-color: #4a5180; }
   .tab-btn:hover:not(.active) { color: #94a3b8; }
 
+  /* All views hidden initially */
+  #view-trading, #view-portfolio, #view-performance, #view-intelligence { display: none; }
+
   /* Trading view */
-  #view-trading { display: none; }
   .status-bar { display: flex; align-items: center; gap: 16px; background: #1e2130;
     border: 1px solid #2d3148; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; flex-wrap: wrap; }
   .status-bar span { font-size: 12px; color: #64748b; }
@@ -59,6 +63,7 @@
   .signal-card { background: #1e2130; border: 1px solid #2d3148; border-radius: 8px; padding: 14px; }
   .signal-card.score-3 { border-color: #4ade80; }
   .signal-card.score-2 { border-color: #fb923c; }
+  .signal-card.score-4, .signal-card.score-5 { border-color: #c084fc; }
   .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .card-ticker { font-size: 18px; font-weight: 700; color: #f8fafc; }
   .card-score { font-size: 13px; color: #64748b; }
@@ -73,14 +78,55 @@
   }
   .period-btn {
     background: #0f1117; color: #64748b; border: 1px solid #2d3148;
-    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer;
-    transition: all .15s;
+    border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: all .15s;
   }
   .period-btn.active { background: #2d3148; color: #e2e8f0; border-color: #4a5180; }
   .period-btn:hover:not(.active) { border-color: #4a5180; color: #94a3b8; }
   #chart-info { font-size: 12px; color: #64748b; margin-right: auto; }
   #chart-container { direction: ltr; width: 100%; height: 360px; border-radius: 6px; overflow: hidden; }
   #chart-loading { color: #475569; font-size: 13px; text-align: center; padding: 60px 0; display: none; }
+
+  /* Portfolio */
+  .pnl-positive { color: #4ade80; font-weight: 700; }
+  .pnl-negative { color: #f87171; font-weight: 700; }
+  .equity-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+  .equity-card { background: #161a27; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 12px 18px; min-width: 140px; }
+  .equity-card .eq-label { font-size: 11px; color: #475569; margin-bottom: 4px; }
+  .equity-card .eq-val { font-size: 18px; font-weight: 700; color: #f8fafc; }
+  .equity-card .eq-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+  /* Performance */
+  .leaderboard-row { display: flex; align-items: center; gap: 8px; padding: 8px 0;
+    border-bottom: 1px solid #1a1e2e; }
+  .leaderboard-row:last-child { border-bottom: none; }
+  .strat-name { min-width: 110px; font-weight: 600; color: #f8fafc; font-size: 13px; }
+  .win-bar-track { flex: 1; background: #161a27; border-radius: 4px; height: 6px; overflow: hidden; }
+  .win-bar-fill { height: 100%; border-radius: 4px; background: #4ade80; transition: width .4s; }
+  .win-rate-label { min-width: 40px; font-size: 12px; font-weight: 600; text-align: left; }
+  .metric-chip { background: #161a27; border: 1px solid #2d3148; border-radius: 4px;
+    padding: 2px 7px; font-size: 11px; color: #94a3b8; white-space: nowrap; }
+  .outcome-win { color: #4ade80; font-weight: 600; }
+  .outcome-loss { color: #f87171; font-weight: 600; }
+
+  /* Intelligence */
+  .lesson-card { background: #161a27; border-radius: 6px; padding: 10px 14px;
+    border-right: 3px solid #4a5180; margin-bottom: 8px; }
+  .lesson-card.win { border-right-color: #4ade80; }
+  .lesson-card.loss { border-right-color: #f87171; }
+  .lesson-card.warn { border-right-color: #fbbf24; }
+  .lesson-meta { font-size: 11px; color: #475569; margin-top: 4px; }
+  .critique-card { background: #161a27; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 14px; margin-bottom: 10px; }
+  .critique-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: #475569; margin-bottom: 4px; }
+  .critique-text { font-size: 13px; color: #cbd5e1; line-height: 1.6; }
+
+  /* Audit */
+  .audit-row { padding: 6px 0; border-bottom: 1px solid #1a1e2e; font-size: 12px; }
+  .audit-row:last-child { border-bottom: none; }
+  .audit-event { color: #60a5fa; font-weight: 600; margin-left: 8px; }
+  .audit-ts { color: #334155; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -91,9 +137,12 @@
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('dashboard')">📊 דשבורד</button>
   <button class="tab-btn" onclick="switchTab('trading')">⚡ מסחר יומי</button>
+  <button class="tab-btn" onclick="switchTab('portfolio')">💼 פורטפוליו</button>
+  <button class="tab-btn" onclick="switchTab('performance')">📈 ביצועים</button>
+  <button class="tab-btn" onclick="switchTab('intelligence')">🧠 בינה</button>
 </div>
 
-<!-- Daily trading view -->
+<!-- ──────────────────────── Daily Trading ──────────────────────────────── -->
 <div id="view-trading">
   <div class="status-bar">
     <span><strong>סרוק אחרון:</strong> <span id="last-scan-time">—</span></span>
@@ -106,6 +155,65 @@
   </div>
 </div>
 
+<!-- ──────────────────────── Portfolio ──────────────────────────────────── -->
+<div id="view-portfolio">
+  <div class="equity-bar" id="equity-bar">
+    <div class="equity-card"><div class="eq-label">הון כולל</div><div class="eq-val" id="eq-total">—</div></div>
+    <div class="equity-card"><div class="eq-label">מזומן</div><div class="eq-val" id="eq-cash">—</div></div>
+    <div class="equity-card"><div class="eq-label">שווי שוק</div><div class="eq-val" id="eq-market">—</div></div>
+    <div class="equity-card"><div class="eq-label">רווח/הפסד פתוח</div><div class="eq-val" id="eq-pnl">—</div><div class="eq-sub" id="eq-pnl-pct">—</div></div>
+  </div>
+  <div class="card full">
+    <h2>פוזיציות פתוחות</h2>
+    <div id="positions-container"><p class="empty">אין פוזיציות פתוחות</p></div>
+  </div>
+</div>
+
+<!-- ──────────────────────── Performance ────────────────────────────────── -->
+<div id="view-performance">
+  <div class="grid">
+    <div class="card full">
+      <h2>לוח מובילי אסטרטגיות</h2>
+      <div id="leaderboard-container"><p class="empty">טוען נתונים — נדרשות לפחות 5 תוצאות...</p></div>
+    </div>
+    <div class="card full">
+      <h2>תוצאות אחרונות (24h)</h2>
+      <div id="outcomes-container"><p class="empty">אין תוצאות עדיין</p></div>
+    </div>
+    <div class="card">
+      <h2>שילובי סיגנלים — שיעור הצלחה</h2>
+      <div id="signal-combos-container"><p class="empty">אין נתונים</p></div>
+    </div>
+    <div class="card">
+      <h2>סטטיסטיקות מערכת</h2>
+      <div id="system-stats-container"><p class="empty">טוען...</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────────────── Intelligence ───────────────────────────────── -->
+<div id="view-intelligence">
+  <div class="grid">
+    <div class="card full">
+      <h2>ביקורת עצמית — מחזור אחרון</h2>
+      <div id="critique-container"><p class="empty">אין ביקורות עדיין — נדרשות תוצאות ממשיות</p></div>
+    </div>
+    <div class="card">
+      <h2>לקחים אחרונים</h2>
+      <div id="lessons-container"><p class="empty">אין לקחים עדיין</p></div>
+    </div>
+    <div class="card">
+      <h2>שיעורי הצלחה לפי סיגנלים</h2>
+      <div id="intel-signal-container"><p class="empty">אין נתונים</p></div>
+    </div>
+    <div class="card full">
+      <h2>יומן ביקורת (Audit Log)</h2>
+      <div id="audit-container"><p class="empty">טוען...</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────────────── Dashboard (default) ────────────────────────── -->
 <div id="view-dashboard" class="grid">
 
   <!-- Chart -->
@@ -146,105 +254,28 @@
     <h2>פידבק</h2>
     <div id="feedback-container"><p class="empty">טוען...</p></div>
   </div>
-</div>
 
 </div><!-- /view-dashboard -->
 
 <div id="refresh-time"></div>
 
 <script>
-// ─── Chart ────────────────────────────────────────────────────────────────────
-let chart = null;
-let candleSeries = null;
-let currentTicker = 'AAPL';
-let currentPeriod = '1d';
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const SIGNAL_LABELS = {
+  breakout: 'פריצה', momentum: 'מומנטום', options: 'אופציות',
+  mean_reversion: 'היפוך', trend_following: 'טרנד'
+};
 
-function initChart() {
-  const container = document.getElementById('chart-container');
-  const w = container.offsetWidth || window.innerWidth - 80;
-  chart = LightweightCharts.createChart(container, {
-    width: w,
-    height: 360,
-    layout: { background: { color: '#1e2130' }, textColor: '#94a3b8' },
-    grid: { vertLines: { color: '#252840' }, horzLines: { color: '#252840' } },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d3148' },
-    rightPriceScale: { borderColor: '#2d3148' },
-  });
-  candleSeries = chart.addCandlestickSeries({
-    upColor: '#4ade80', downColor: '#f87171',
-    borderUpColor: '#4ade80', borderDownColor: '#f87171',
-    wickUpColor: '#4ade80', wickDownColor: '#f87171',
-  });
-  window.addEventListener('resize', () => {
-    chart.applyOptions({ width: container.offsetWidth });
-  });
+function badge(sig) {
+  return `<span class="badge b-${sig}">${SIGNAL_LABELS[sig] || sig}</span>`;
 }
 
-async function loadChart() {
-  const loading = document.getElementById('chart-loading');
-  document.getElementById('chart-info').textContent = 'טוען...';
-
-  try {
-    const res = await fetch(`/api/chart/${currentTicker}?period=${currentPeriod}`);
-    const data = await res.json();
-
-    if (!data.candles || !data.candles.length) {
-      document.getElementById('chart-info').textContent = 'אין נתונים (שוק סגור?)';
-      candleSeries.setData([]);
-      return;
-    }
-
-    candleSeries.setData(data.candles);
-    chart.timeScale().fitContent();
-
-    const last = data.candles[data.candles.length - 1];
-    const first = data.candles[0];
-    const change = ((last.close - first.open) / first.open * 100).toFixed(2);
-    const cls = change >= 0 ? 'up' : 'down';
-    const sign = change >= 0 ? '+' : '';
-    document.getElementById('chart-info').innerHTML =
-      `<strong>${currentTicker}</strong> &nbsp;$${last.close.toFixed(2)} &nbsp;<span class="${cls}">${sign}${change}%</span>`;
-  } catch (e) {
-    document.getElementById('chart-info').textContent = 'שגיאה בטעינת הנתונים';
-  }
+function fmt(ts) {
+  const d = new Date(ts + (ts.includes('Z') || ts.includes('+') ? '' : 'Z'));
+  return d.toLocaleString('he-IL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
 
-document.getElementById('ticker-select').addEventListener('change', e => {
-  currentTicker = e.target.value;
-  loadChart();
-});
-
-document.querySelectorAll('.period-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentPeriod = btn.dataset.period;
-    loadChart();
-  });
-});
-
-// ─── Tab switching ────────────────────────────────────────────────────────────
-let tradingPollTimer = null;
-
-function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach((b, i) => {
-    b.classList.toggle('active', (i === 0 && name === 'dashboard') || (i === 1 && name === 'trading'));
-  });
-  document.getElementById('view-dashboard').style.display = name === 'dashboard' ? 'grid' : 'none';
-  document.getElementById('view-trading').style.display  = name === 'trading'   ? 'block' : 'none';
-
-  if (name === 'trading') {
-    loadRecommendations();
-    if (!tradingPollTimer) tradingPollTimer = setInterval(loadRecommendations, 5000);
-  } else {
-    clearInterval(tradingPollTimer);
-    tradingPollTimer = null;
-  }
-}
-
-// ─── Recommendations (daily trading) ─────────────────────────────────────────
-const SCORE_STARS = ['', '⭐', '⭐⭐', '⭐⭐⭐'];
+function fmtUSD(v) { return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 function fmtRelTime(ts) {
   if (!ts) return '—';
@@ -261,11 +292,97 @@ function fmtCountdown(ts) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function pnlClass(v) { return v > 0 ? 'pnl-positive' : v < 0 ? 'pnl-negative' : 'neutral'; }
+function signClass(v) { return v > 0 ? 'up' : v < 0 ? 'down' : 'neutral'; }
+
+// ─── Chart ────────────────────────────────────────────────────────────────────
+let chart = null, candleSeries = null;
+let currentTicker = 'AAPL', currentPeriod = '1d';
+
+function initChart() {
+  const container = document.getElementById('chart-container');
+  const w = container.offsetWidth || window.innerWidth - 80;
+  chart = LightweightCharts.createChart(container, {
+    width: w, height: 360,
+    layout: { background: { color: '#1e2130' }, textColor: '#94a3b8' },
+    grid: { vertLines: { color: '#252840' }, horzLines: { color: '#252840' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d3148' },
+    rightPriceScale: { borderColor: '#2d3148' },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#4ade80', downColor: '#f87171',
+    borderUpColor: '#4ade80', borderDownColor: '#f87171',
+    wickUpColor: '#4ade80', wickDownColor: '#f87171',
+  });
+  window.addEventListener('resize', () => { chart.applyOptions({ width: container.offsetWidth }); });
+}
+
+async function loadChart() {
+  document.getElementById('chart-info').textContent = 'טוען...';
+  try {
+    const res = await fetch(`/api/chart/${currentTicker}?period=${currentPeriod}`);
+    const data = await res.json();
+    if (!data.candles || !data.candles.length) {
+      document.getElementById('chart-info').textContent = 'אין נתונים (שוק סגור?)';
+      candleSeries.setData([]); return;
+    }
+    candleSeries.setData(data.candles);
+    chart.timeScale().fitContent();
+    const last = data.candles[data.candles.length - 1], first = data.candles[0];
+    const change = ((last.close - first.open) / first.open * 100).toFixed(2);
+    const cls = change >= 0 ? 'up' : 'down', sign = change >= 0 ? '+' : '';
+    document.getElementById('chart-info').innerHTML =
+      `<strong>${currentTicker}</strong> &nbsp;$${last.close.toFixed(2)} &nbsp;<span class="${cls}">${sign}${change}%</span>`;
+  } catch (e) { document.getElementById('chart-info').textContent = 'שגיאה בטעינת הנתונים'; }
+}
+
+document.getElementById('ticker-select').addEventListener('change', e => { currentTicker = e.target.value; loadChart(); });
+document.querySelectorAll('.period-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPeriod = btn.dataset.period;
+    loadChart();
+  });
+});
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+const VIEWS = ['dashboard', 'trading', 'portfolio', 'performance', 'intelligence'];
+let tradingPollTimer = null, perfPollTimer = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', VIEWS[i] === name);
+  });
+  VIEWS.forEach(v => {
+    const el = document.getElementById(`view-${v}`);
+    if (el) el.style.display = v === name ? (v === 'dashboard' ? 'grid' : 'block') : 'none';
+  });
+
+  clearInterval(tradingPollTimer); tradingPollTimer = null;
+  clearInterval(perfPollTimer); perfPollTimer = null;
+
+  if (name === 'trading') {
+    loadRecommendations();
+    tradingPollTimer = setInterval(loadRecommendations, 5000);
+  } else if (name === 'portfolio') {
+    loadPortfolio();
+  } else if (name === 'performance') {
+    loadPerformance();
+    perfPollTimer = setInterval(loadPerformance, 30000);
+  } else if (name === 'intelligence') {
+    loadIntelligence();
+  }
+}
+
+// ─── Recommendations (daily trading) ─────────────────────────────────────────
+const SCORE_STARS = ['', '⭐', '⭐⭐', '⭐⭐⭐', '⭐⭐⭐⭐', '⭐⭐⭐⭐⭐'];
+
 async function loadRecommendations() {
   try {
     const res = await fetch('/api/recommendations');
     const data = await res.json();
-
     document.getElementById('last-scan-time').textContent = fmtRelTime(data.last_scan);
     document.getElementById('next-scan-countdown').textContent = data.running ? '—' : fmtCountdown(data.next_scan);
     document.getElementById('scan-running-indicator').style.display = data.running ? 'inline' : 'none';
@@ -280,19 +397,16 @@ async function loadRecommendations() {
       container.innerHTML = '<p class="empty">לא נמצאו הזדמנויות בסריקה האחרונה</p>';
       return;
     }
-
     container.innerHTML = data.signals.map(s => {
       const badges = (s.signal_types || []).map(badge).join(' ');
-      const detailLines = Object.entries(s.details || {})
-        .map(([k, v]) => `<span style="color:#94a3b8">${k}:</span> ${v}`)
-        .join('<br>');
+      const detailLines = Object.entries(s.details || {}).map(([k,v]) => `<span style="color:#94a3b8">${k}:</span> ${v}`).join('<br>');
       const confLine = s.confidence !== undefined
-        ? `<div style="font-size:12px;color:#94a3b8">ביטחון: <strong>${Math.round(s.confidence * 100)}%</strong>${s.approved === false ? ' <span class="down">⚠️ נדחה בבדיקות סיכון</span>' : ''}</div>`
+        ? `<div style="font-size:12px;color:#94a3b8;margin-top:4px">ביטחון: <strong>${Math.round(s.confidence*100)}%</strong>${s.approved===false?' <span class="down">⚠️ נדחה בבדיקות סיכון</span>':''}</div>`
         : '';
       return `<div class="signal-card score-${s.score}">
         <div class="card-header">
           <span class="card-ticker">${s.ticker}</span>
-          <span class="card-score">${SCORE_STARS[s.score] || s.score}</span>
+          <span class="card-score">${SCORE_STARS[Math.min(s.score,5)]||s.score}</span>
         </div>
         <div>${badges}</div>
         <div class="card-price">$${Number(s.price).toFixed(2)}</div>
@@ -300,43 +414,234 @@ async function loadRecommendations() {
         <div class="card-details">${detailLines}</div>
       </div>`;
     }).join('');
-  } catch (e) { /* silent */ }
+  } catch(e) {}
 }
 
 async function triggerScan() {
-  const btn = document.getElementById('scan-now-btn');
-  btn.disabled = true;
+  document.getElementById('scan-now-btn').disabled = true;
   await fetch('/api/scan', { method: 'POST' });
   loadRecommendations();
 }
 
-// ─── Existing sections ────────────────────────────────────────────────────────
-const SIGNAL_LABELS = { breakout: 'פריצה', momentum: 'מומנטום', options: 'אופציות' };
+// ─── Portfolio ────────────────────────────────────────────────────────────────
+async function loadPortfolio() {
+  try {
+    const res = await fetch('/api/portfolio');
+    const data = await res.json();
+    if (data.error) { return; }
 
-function badge(sig) {
-  return `<span class="badge b-${sig}">${SIGNAL_LABELS[sig] || sig}</span>`;
+    document.getElementById('eq-total').textContent = fmtUSD(data.total_equity);
+    document.getElementById('eq-cash').textContent = fmtUSD(data.cash);
+    document.getElementById('eq-market').textContent = fmtUSD(data.total_market_value);
+
+    const pnlEl = document.getElementById('eq-pnl');
+    const pnlPctEl = document.getElementById('eq-pnl-pct');
+    const pnl = data.total_unrealized_pnl;
+    const sign = pnl >= 0 ? '+' : '';
+    pnlEl.textContent = `${sign}${fmtUSD(pnl)}`;
+    pnlEl.className = `eq-val ${pnlClass(pnl)}`;
+    pnlPctEl.textContent = `${sign}${data.total_unrealized_pnl_pct}%`;
+    pnlPctEl.className = `eq-sub ${signClass(pnl)}`;
+
+    const container = document.getElementById('positions-container');
+    if (!data.positions || !data.positions.length) {
+      container.innerHTML = '<p class="empty">אין פוזיציות פתוחות</p>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>סימבול</th><th>כמות</th><th>מחיר כניסה</th><th>מחיר נוכחי</th>
+      <th>שווי שוק</th><th>עלות</th><th>רווח/הפסד</th><th>%</th>
+    </tr></thead><tbody>`;
+    for (const p of data.positions) {
+      const pnlCls = pnlClass(p.unrealized_pnl);
+      const sign = p.unrealized_pnl >= 0 ? '+' : '';
+      html += `<tr>
+        <td><strong>${p.symbol}</strong></td>
+        <td>${p.quantity}</td>
+        <td class="price">$${p.avg_entry_price}</td>
+        <td class="price">${p.current_price ? '$'+p.current_price : '—'}</td>
+        <td>${fmtUSD(p.market_value)}</td>
+        <td class="neutral">${fmtUSD(p.cost_basis)}</td>
+        <td class="${pnlCls}">${sign}${fmtUSD(p.unrealized_pnl)}</td>
+        <td class="${pnlCls}">${sign}${p.unrealized_pnl_pct}%</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch(e) {}
 }
 
-function fmt(ts) {
-  const d = new Date(ts + 'Z');
-  return d.toLocaleString('he-IL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+// ─── Performance ─────────────────────────────────────────────────────────────
+async function loadPerformance() {
+  try {
+    const res = await fetch('/api/performance');
+    const data = await res.json();
+
+    // Leaderboard
+    const lbEl = document.getElementById('leaderboard-container');
+    if (data.leaderboard && data.leaderboard.length) {
+      lbEl.innerHTML = data.leaderboard.map(row => {
+        const wr = Math.round(row.win_rate * 100);
+        const color = wr >= 60 ? '#4ade80' : wr >= 45 ? '#fb923c' : '#f87171';
+        const ret = row.avg_return_pct;
+        const retSign = ret >= 0 ? '+' : '';
+        return `<div class="leaderboard-row">
+          <span class="strat-name">${SIGNAL_LABELS[row.strategy] || row.strategy}</span>
+          <div class="win-bar-track"><div class="win-bar-fill" style="width:${wr}%;background:${color}"></div></div>
+          <span class="win-rate-label" style="color:${color}">${wr}%</span>
+          <span class="metric-chip">Sharpe ${row.sharpe}</span>
+          <span class="metric-chip">${retSign}${ret}% avg</span>
+          <span class="metric-chip">MDD ${row.max_drawdown_pct}%</span>
+          <span class="metric-chip">${row.total} trades</span>
+        </div>`;
+      }).join('');
+    } else {
+      lbEl.innerHTML = '<p class="empty">אין מספיק נתונים עדיין (נדרשות 5+ תוצאות לאסטרטגיה)</p>';
+    }
+
+    // Recent outcomes
+    const outEl = document.getElementById('outcomes-container');
+    if (data.recent_outcomes && data.recent_outcomes.length) {
+      let html = `<table><thead><tr><th>סימבול</th><th>כניסה</th><th>יציאה</th><th>תשואה</th><th>סיגנלים</th><th>ביטחון</th></tr></thead><tbody>`;
+      for (const o of data.recent_outcomes) {
+        const ret = (o.return_pct * 100).toFixed(2);
+        const retSign = o.return_pct >= 0 ? '+' : '';
+        const cls = o.is_win ? 'outcome-win' : 'outcome-loss';
+        html += `<tr>
+          <td><strong>${o.symbol}</strong></td>
+          <td class="price">$${o.entry_price}</td>
+          <td class="price">$${o.exit_price}</td>
+          <td class="${cls}">${retSign}${ret}%</td>
+          <td>${(o.signal_types||[]).map(badge).join(' ')}</td>
+          <td class="neutral">${Math.round(o.confidence*100)}%</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      outEl.innerHTML = html;
+    } else {
+      outEl.innerHTML = '<p class="empty">אין תוצאות עדיין — המערכת מעריכה תוצאות לאחר 24 שעות</p>';
+    }
+
+    // Signal combos
+    const scEl = document.getElementById('signal-combos-container');
+    if (data.signal_combinations && Object.keys(data.signal_combinations).length) {
+      scEl.innerHTML = Object.entries(data.signal_combinations).map(([combo, stats]) => {
+        const wr = Math.round(stats.win_rate * 100);
+        const color = wr >= 60 ? '#4ade80' : wr >= 45 ? '#fb923c' : '#f87171';
+        return `<div class="stat-row">
+          <span class="stat-label" style="font-size:12px">${combo}</span>
+          <span class="stat-val" style="color:${color}">${wr}% <span class="neutral">(${stats.total})</span></span>
+        </div>`;
+      }).join('');
+    } else {
+      scEl.innerHTML = '<p class="empty">אין נתונים</p>';
+    }
+
+    // System stats
+    const ssEl = document.getElementById('system-stats-container');
+    ssEl.innerHTML = `
+      <div class="stat-row"><span class="stat-label">סה"כ תוצאות</span><span class="stat-val">${data.total_evaluated||0}</span></div>
+      <div class="stat-row"><span class="stat-label">ממתין להערכה</span><span class="stat-val">${data.pending||0}</span></div>
+    `;
+  } catch(e) {}
 }
 
+// ─── Intelligence ─────────────────────────────────────────────────────────────
+async function loadIntelligence() {
+  try {
+    const res = await fetch('/api/learning');
+    const data = await res.json();
+
+    // Critiques
+    const criEl = document.getElementById('critique-container');
+    if (data.recent_critiques && data.recent_critiques.length) {
+      const c = data.recent_critiques[0];
+      criEl.innerHTML = `<div class="critique-card">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="metric-chip">🏆 מוביל: ${SIGNAL_LABELS[c.top_strategy]||c.top_strategy}</span>
+          <span class="metric-chip">⬇️ חלש: ${SIGNAL_LABELS[c.worst_strategy]||c.worst_strategy}</span>
+          <span class="metric-chip">⏱️ ${c.scan_duration_s}s סריקה</span>
+          <span class="time">${fmt(c.generated_at)}</span>
+        </div>
+        ${[
+          ['❌ הטעות הגדולה ביותר', c.biggest_mistake],
+          ['✅ ההצלחה הגדולה ביותר', c.biggest_success],
+          ['⚠️ הטיה שזוהתה', c.detected_bias],
+          ['🔍 נתונים חסרים', c.missing_data],
+          ['💡 הצעה לשיפור', c.improvement_suggestion],
+        ].map(([label, text]) => `
+          <div style="margin-bottom:10px">
+            <div class="critique-label">${label}</div>
+            <div class="critique-text">${text}</div>
+          </div>`).join('')}
+      </div>`;
+    } else {
+      criEl.innerHTML = '<p class="empty">אין ביקורות עדיין — נדרשות תוצאות ממשיות לאחר 24 שעות</p>';
+    }
+
+    // Lessons
+    const lesEl = document.getElementById('lessons-container');
+    if (data.recent_lessons && data.recent_lessons.length) {
+      lesEl.innerHTML = data.recent_lessons.map(l => {
+        const cls = l.was_win ? 'win' : l.text && l.text.includes('OVERCONF') ? 'warn' : 'loss';
+        return `<div class="lesson-card ${cls}">
+          <div style="font-size:13px;color:#cbd5e1">${l.text}</div>
+          <div class="lesson-meta">${l.symbol} · ${l.was_win ? '✅ WIN' : '❌ LOSS'} · ${(l.return_pct>=0?'+':'')}${l.return_pct}% · ${fmt(l.extracted_at)}</div>
+        </div>`;
+      }).join('');
+    } else {
+      lesEl.innerHTML = '<p class="empty">אין לקחים עדיין</p>';
+    }
+
+    // Signal win rates (intel tab)
+    const intelEl = document.getElementById('intel-signal-container');
+    if (data.signal_win_rates && Object.keys(data.signal_win_rates).length) {
+      intelEl.innerHTML = Object.entries(data.signal_win_rates).map(([combo, stats]) => {
+        const wr = Math.round(stats.win_rate * 100);
+        const color = wr >= 60 ? '#4ade80' : wr >= 45 ? '#fb923c' : '#f87171';
+        return `<div class="stat-row">
+          <span class="stat-label" style="font-size:12px">${combo}</span>
+          <span class="stat-val" style="color:${color}">${wr}% <span class="neutral">(${stats.total})</span></span>
+        </div>`;
+      }).join('');
+    } else {
+      intelEl.innerHTML = '<p class="empty">אין נתונים</p>';
+    }
+  } catch(e) {}
+
+  // Audit
+  try {
+    const res = await fetch('/api/audit');
+    const data = await res.json();
+    const auditEl = document.getElementById('audit-container');
+    if (data.events && data.events.length) {
+      auditEl.innerHTML = data.events.map(e => {
+        const payload = e.payload ? JSON.stringify(e.payload).slice(0, 120) : '';
+        return `<div class="audit-row">
+          <span class="audit-ts">${fmt(e.ts||'')}</span>
+          <span class="audit-event">${e.event||''}</span>
+          <span style="color:#475569;font-size:11px">${payload}</span>
+        </div>`;
+      }).join('');
+    } else {
+      auditEl.innerHTML = '<p class="empty">אין אירועים</p>';
+    }
+  } catch(e) {}
+}
+
+// ─── Dashboard sections ───────────────────────────────────────────────────────
 async function loadAlerts() {
   const res = await fetch('/api/alerts');
   const { alerts } = await res.json();
   const el = document.getElementById('alerts-container');
   if (!alerts.length) { el.innerHTML = '<p class="empty">אין התראות עדיין</p>'; return; }
-
   let html = '<table><thead><tr><th>Ticker</th><th>ניקוד</th><th>סיגנלים</th><th>מחיר</th><th>פרטים</th><th>זמן</th></tr></thead><tbody>';
   for (const a of alerts) {
-    const badges = (a.signal_types || []).map(badge).join(' ');
-    const details = Object.entries(a.details || {}).map(([k,v]) => `<span style="color:#64748b">${k}:</span> ${v}`).join(' &nbsp;|&nbsp; ');
+    const badges = (a.signal_types||[]).map(badge).join(' ');
+    const details = Object.entries(a.details||{}).map(([k,v]) => `<span style="color:#64748b">${k}:</span> ${v}`).join(' &nbsp;|&nbsp; ');
     html += `<tr>
-      <td><strong>${a.ticker}</strong></td>
-      <td class="score">${a.score}</td>
-      <td>${badges}</td>
-      <td class="price">$${Number(a.price).toFixed(2)}</td>
+      <td><strong>${a.ticker}</strong></td><td class="score">${a.score}</td>
+      <td>${badges}</td><td class="price">$${Number(a.price).toFixed(2)}</td>
       <td style="font-size:12px;color:#94a3b8">${details}</td>
       <td class="time">${fmt(a.timestamp)}</td>
     </tr>`;
@@ -350,23 +655,20 @@ async function loadWeights() {
   const { weights } = await res.json();
   const el = document.getElementById('weights-container');
   const LABELS = {
-    breakout_volume_ratio: 'נפח × ממוצע (פריצה)',
-    breakout_pct_from_high: '% מ-52w High',
-    momentum_rsi_min: 'RSI מינימום',
-    momentum_price_above_ma: 'תקופת MA',
-    options_vol_oi_ratio: 'Vol/OI אופציות',
-    options_iv_percentile_min: 'IV מינימום',
-    min_score_to_alert: 'ניקוד מינימום להתראה',
+    breakout_volume_ratio:'נפח × ממוצע (פריצה)', breakout_pct_from_high:'% מ-52w High',
+    momentum_rsi_min:'RSI מינימום', momentum_price_above_ma:'תקופת MA',
+    options_vol_oi_ratio:'Vol/OI אופציות', options_iv_percentile_min:'IV מינימום',
+    min_score_to_alert:'ניקוד מינימום להתראה',
   };
   let html = '';
   for (const [k, v] of Object.entries(weights)) {
-    const cur = Number(v.current), def = Number(v.default), diff = cur - def;
+    const cur = Number(v.current), diff = cur - Number(v.default);
     let deltaHtml = '';
     if (Math.abs(diff) > 0.0001) {
       const cls = diff > 0 ? 'up' : 'down';
-      deltaHtml = `<span class="delta ${cls}">(${diff > 0 ? '+' : ''}${diff.toFixed(2)})</span>`;
+      deltaHtml = `<span class="delta ${cls}">(${diff>0?'+':''}${diff.toFixed(2)})</span>`;
     }
-    html += `<div class="stat-row"><span class="stat-label">${LABELS[k] || k}</span><span class="stat-val">${deltaHtml}${cur}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">${LABELS[k]||k}</span><span class="stat-val">${deltaHtml}${cur}</span></div>`;
   }
   el.innerHTML = html || '<p class="empty">אין נתונים</p>';
 }
@@ -378,35 +680,34 @@ async function loadFeedback() {
   const pct = data.total ? Math.round(data.positive / data.total * 100) : 0;
   let html = `<div class="stat-row"><span class="stat-label">סה"כ פידבק</span><span class="stat-val">${data.total}</span></div>`;
   html += `<div class="stat-row"><span class="stat-label">חיובי / שלילי</span><span class="stat-val"><span class="up">${data.positive}</span> / <span class="down">${data.negative}</span> <span class="neutral">(${pct}%)</span></span></div>`;
-  if (Object.keys(data.by_signal || {}).length) {
+  if (Object.keys(data.by_signal||{}).length) {
     html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">לפי סוג סיגנל</div>`;
     for (const [sig, counts] of Object.entries(data.by_signal)) {
       const t = counts.positive + counts.negative;
-      html += `<div class="stat-row">${badge(sig)}<span class="stat-val neutral">${t ? Math.round(counts.positive/t*100) : 0}% חיובי (${t})</span></div>`;
+      html += `<div class="stat-row">${badge(sig)}<span class="stat-val neutral">${t?Math.round(counts.positive/t*100):0}% חיובי (${t})</span></div>`;
     }
   }
   if (data.top_tickers && data.top_tickers.length) {
     html += `<div style="margin:10px 0 4px;color:#475569;font-size:12px">Top tickers</div>`;
     for (const t of data.top_tickers) {
       const tot = t.positive + t.negative;
-      html += `<div class="stat-row"><span class="stat-label">${t.ticker}</span><span class="stat-val neutral">${tot ? Math.round(t.positive/tot*100) : 0}% (${tot})</span></div>`;
+      html += `<div class="stat-row"><span class="stat-label">${t.ticker}</span><span class="stat-val neutral">${tot?Math.round(t.positive/tot*100):0}% (${tot})</span></div>`;
     }
   }
   el.innerHTML = html || '<p class="empty">אין פידבק עדיין</p>';
 }
 
-async function refresh() {
+async function refreshDashboard() {
   await Promise.all([loadAlerts(), loadWeights(), loadFeedback()]);
-  const now = new Date().toLocaleTimeString('he-IL');
-  document.getElementById('last-updated').textContent = `עודכן: ${now}`;
+  document.getElementById('last-updated').textContent = `עודכן: ${new Date().toLocaleTimeString('he-IL')}`;
   document.getElementById('refresh-time').textContent = `רענון אוטומטי כל 30 שניות`;
 }
 
-// Initial load — init chart immediately so container has correct dimensions
+// ─── Boot ─────────────────────────────────────────────────────────────────────
 initChart();
 loadChart();
-refresh();
-setInterval(refresh, 30000);
+refreshDashboard();
+setInterval(refreshDashboard, 30000);
 </script>
 </body>
 </html>
