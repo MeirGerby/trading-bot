@@ -4,8 +4,9 @@ _Last updated: 2026-06-12_
 
 ## 📋 Current sprint
 
-- Phases 1–3 delivered this session: docs, domain models, ports, settings, yfinance market-data adapter
-- Next sprint: Phase 4 memory layer
+- Phases 4–5 delivered: JsonMemoryStore (atomic writes + flock), feedback.py migrated onto it,
+  indicators (Wilder RSI, SMA), Breakout + Momentum strategies behind the Strategy port
+- Next sprint: ScanService orchestration + options-data port
 
 ## ✅ Completed
 
@@ -16,19 +17,23 @@ _Last updated: 2026-06-12_
 - Phase 1: architecture docs, roadmap, knowledge base, project status tracking
 - Phase 2: `trading_platform` package — domain models with validation, Protocol ports, env-driven settings, unit tests
 - Phase 3: `YFinanceMarketData` adapter — TTL cache, MultiIndex flattening, NaN-row skipping, injectable downloader (9 tests)
+- Phase 4: `JsonMemoryStore` — atomic temp-file writes, flock serialization across bot/dashboard containers,
+  legacy-compatible feedback format; `feedback.py` migrated with regression tests
+- Phase 5 (partial): pure-python indicators (proper Wilder RSI replacing legacy approximation, SMA);
+  `BreakoutStrategy` + `MomentumStrategy` with normalized strength scores
 
 ## 📝 Backlog (priority order)
 
-1. Phase 4: `JsonMemoryStore` implementing `MemoryStore`; migrate `feedback.py` onto it
-2. Phase 5: port breakout/momentum/options checks to `Strategy` implementations + registry
-3. `ScanService` orchestration; make `bot.py` and `dashboard.py` thin adapters
-4. Phase 6: risk rule pipeline
-5. Persist dashboard scan cache to disk (survive restarts)
-6. CI workflow (pytest on push)
+1. `OptionsDataPort` + port the options-flow check (completes Phase 5)
+2. `ScanService` orchestration; make `bot.py` and `dashboard.py` thin adapters
+3. Phase 6: risk rule pipeline
+4. Persist dashboard scan cache to disk (survive restarts)
+5. CI workflow (pytest on push)
 
 ## ⚠️ Technical debt
 
-- Legacy flat modules (`scanner.py`, `feedback.py`) duplicate concepts now modeled in `trading_platform.domain` — converge in Phases 3–5
+- `scanner.py` still duplicates strategy logic now in `trading_platform.application.strategies` — converges when ScanService lands and bot.py switches over
+- New strategies use proper Wilder RSI; legacy scanner uses an approximation — RSI values will shift slightly at switchover (document for the owner)
 - `dashboard.py` background-scan thread shares no lock with request handlers (GIL-safe for current dict swaps, but fragile)
 - `options_iv_percentile_min` weight exists but is unused by scanner logic
 - No CI; tests run locally only
