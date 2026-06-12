@@ -41,6 +41,12 @@ DEFAULT_RISK_PARAMS: dict[str, float] = {
     "max_total_exposure_pct": 0.80,    # total invested cap vs equity
     "min_cash_reserve_pct": 0.10,      # cash floor after any trade
     "paper_starting_cash": 100_000.0,
+    # Currency normalization: TASE prices arrive in agorot (ILA = ILS/100)
+    "ils_to_usd": 0.27,               # ILS → USD conversion rate for portfolio math
+    # Exit rules — thresholds that trigger autonomous SELL orders
+    "stop_loss_pct": 0.08,            # exit when position is down >8% from entry
+    "take_profit_pct": 0.20,          # exit when position is up >20% from entry
+    "signal_decay_scans": 0.0,        # >0 enables decay exit when symbol has no signals
 }
 
 DEFAULT_FEE_PARAMS: dict[str, float] = {

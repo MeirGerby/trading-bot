@@ -32,13 +32,13 @@ from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
 from trading_platform.application.services.portfolio_engine import PortfolioEngine
-from trading_platform.application.services.risk_engine import RiskEngine
+from trading_platform.application.services.risk_engine import ExitEngine, RiskEngine
 from trading_platform.application.services.self_critique_engine import (
     ScanSummary,
     SelfCritiqueEngine,
 )
 from trading_platform.config import Settings
-from trading_platform.domain import Instrument, Order, OrderSide, Recommendation, Signal
+from trading_platform.domain import Instrument, Order, OrderSide, Recommendation, Signal, market_for_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,8 @@ class ScanService:
                  learning_engine: LearningEngine | None = None,
                  self_critique_engine: SelfCritiqueEngine | None = None,
                  auto_execute: bool = False,
-                 symbol_repository: SymbolRepositoryPort | None = None):
+                 symbol_repository: SymbolRepositoryPort | None = None,
+                 exit_engine: ExitEngine | None = None):
         self._settings = settings
         self._strategies = strategies
         self._memory = memory
@@ -155,6 +156,7 @@ class ScanService:
         # PaperBroker in bootstrap (ADR-5: live trading needs owner approval).
         self._auto_execute = auto_execute
         self._symbols = symbol_repository
+        self._exit_engine = exit_engine
 
     def active_watchlist(self) -> tuple[str, ...]:
         """Dynamic watchlist from the symbol repository; settings fallback.
@@ -231,7 +233,7 @@ class ScanService:
                 except Exception:
                     logger.exception("meta decision engine adjust failed for %s", symbol)
 
-            quantity = self._portfolio.propose_quantity(portfolio, price, rec.confidence)
+            quantity = self._portfolio.propose_quantity(portfolio, price, rec.confidence, symbol)
             rec = replace(rec, proposed_quantity=quantity)
             rec = self._risk.review(rec, portfolio)
             recommendations.append(rec)
@@ -250,6 +252,10 @@ class ScanService:
                     portfolio = self._broker.get_portfolio()  # refresh cash for next risk checks
                 except Exception:
                     logger.exception("auto-execute failed for %s", symbol)
+
+        # Exit pass: evaluate stop-loss / take-profit / signal-decay for open positions
+        if self._auto_execute and self._exit_engine is not None:
+            self._exit_pass({r.instrument.symbol for r in recommendations})
 
         recommendations.sort(key=lambda r: (r.score, r.confidence), reverse=True)
         finished = datetime.now(timezone.utc)
@@ -343,6 +349,60 @@ class ScanService:
         })
         store["trades"] = store["trades"][-MAX_TRADE_LOG:]
         self._memory.save(TRADE_LOG_KEY, store)
+
+    def _log_exit_trade(self, order: Order, reason: str) -> None:
+        store = self._memory.load(TRADE_LOG_KEY, {"trades": []})
+        store["trades"].append({
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "order_id": order.id,
+            "symbol": order.symbol,
+            "market": market_for_symbol(order.symbol).value,
+            "side": order.side.value,
+            "quantity": order.quantity,
+            "price": order.price,
+            "value": round(order.quantity * order.price, 2),
+            "status": order.status.value,
+            "reject_reason": order.reason,
+            "confidence": 1.0,
+            "signal_types": ["exit"],
+            "reasoning": reason,
+        })
+        store["trades"] = store["trades"][-MAX_TRADE_LOG:]
+        self._memory.save(TRADE_LOG_KEY, store)
+
+    def _exit_pass(self, active_signal_symbols: set[str]) -> None:
+        """Evaluate open positions for stop-loss, take-profit, and signal-decay exits."""
+        portfolio = self._broker.get_portfolio()
+        if not portfolio.positions:
+            return
+
+        current_prices: dict[str, float] = {}
+        for pos in portfolio.positions:
+            p = self._market_data.get_last_price(pos.instrument.symbol)
+            if p is not None:
+                current_prices[pos.instrument.symbol] = p
+
+        exits = self._exit_engine.check_exits(portfolio, current_prices, active_signal_symbols)
+
+        for symbol, reason in exits:
+            pos = next((p for p in portfolio.positions if p.instrument.symbol == symbol), None)
+            if pos is None:
+                continue
+            price = current_prices.get(symbol)
+            if price is None:
+                continue
+            try:
+                order = self._broker.submit_market_order(
+                    symbol, OrderSide.SELL, pos.quantity, price)
+                self._audit.record("exit_order", {
+                    "symbol": symbol, "reason": reason,
+                    "quantity": pos.quantity, "price": price,
+                    "status": order.status.value, "reject_reason": order.reason,
+                })
+                self._log_exit_trade(order, reason)
+                portfolio = self._broker.get_portfolio()  # refresh after each exit
+            except Exception:
+                logger.exception("exit execution failed for %s", symbol)
 
     def execute(self, rec: Recommendation) -> Order:
         """Execute an approved recommendation on the (paper) broker."""

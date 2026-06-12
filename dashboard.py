@@ -14,8 +14,8 @@ import yfinance as yf
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
-import config
 from trading_platform.application.services import recommendation_to_dict
+from trading_platform.config.settings import DEFAULT_STRATEGY_PARAMS
 from trading_platform.application.services.learning_engine import LearningEngine
 from trading_platform.application.services.meta_decision_engine import MetaDecisionEngine
 from trading_platform.application.services.performance_tracker import PerformanceTracker
@@ -135,7 +135,7 @@ def get_alerts():
 @app.get("/api/weights")
 def get_weights():
     current = _read_json(DATA_DIR / "weights.json", {})
-    defaults = config.DEFAULT_WEIGHTS
+    defaults = DEFAULT_STRATEGY_PARAMS
     merged = {k: {"current": current.get(k, v), "default": v} for k, v in defaults.items()}
     return JSONResponse({"weights": merged})
 

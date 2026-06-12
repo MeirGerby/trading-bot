@@ -6,6 +6,7 @@ from trading_platform.application.services.performance_tracker import Performanc
 from trading_platform.application.services.portfolio_engine import PortfolioEngine
 from trading_platform.application.services.risk_engine import (
     CashReserveRule,
+    ExitEngine,
     MaxExposureRule,
     MaxPositionSizeRule,
     RiskEngine,
@@ -22,6 +23,7 @@ from trading_platform.application.services.self_critique_engine import SelfCriti
 __all__ = [
     "CashReserveRule",
     "DecisionEngine",
+    "ExitEngine",
     "FeeCalculator",
     "LearningEngine",
     "MaxExposureRule",

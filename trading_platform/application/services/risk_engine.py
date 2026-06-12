@@ -3,6 +3,10 @@
 Each rule returns a RiskCheckResult; the engine attaches the full list so
 the audit trail shows exactly which rule rejected and why. A recommendation
 is approved only if all checks pass (Recommendation.approved).
+
+ExitEngine checks open positions against stop-loss, take-profit, and
+(optionally) signal-decay thresholds, returning (symbol, reason) pairs for
+positions that should be closed.
 """
 from collections.abc import Sequence
 from dataclasses import replace
@@ -12,19 +16,39 @@ from trading_platform.application.services.portfolio_engine import PortfolioEngi
 from trading_platform.domain import PortfolioState, Recommendation, RiskCheckResult
 
 
-def _proposed_value(rec: Recommendation) -> float:
+def _equity(rec_or_portfolio, portfolio_engine: PortfolioEngine | None, portfolio: PortfolioState) -> float:
+    if portfolio_engine is not None:
+        return portfolio_engine.equity(portfolio)
+    return portfolio.cash + portfolio.exposure()
+
+
+def _value_usd(rec: Recommendation, portfolio_engine: PortfolioEngine | None) -> float:
+    if portfolio_engine is not None:
+        return portfolio_engine.position_value_usd(
+            rec.proposed_quantity, rec.price, rec.instrument.symbol)
     return rec.proposed_quantity * rec.price
 
+
+def _exposure_usd(portfolio: PortfolioState, portfolio_engine: PortfolioEngine | None) -> float:
+    if portfolio_engine is not None:
+        return portfolio_engine._normalized_exposure(portfolio)
+    return portfolio.exposure()
+
+
+# ---------------------------------------------------------------------------
+# Entry risk rules (BUY-side checks)
+# ---------------------------------------------------------------------------
 
 class MaxPositionSizeRule:
     name = "max_position_size"
 
-    def __init__(self, max_position_pct: float):
+    def __init__(self, max_position_pct: float, portfolio_engine: PortfolioEngine | None = None):
         self._max_pct = max_position_pct
+        self._pe = portfolio_engine
 
     def check(self, rec: Recommendation, portfolio: PortfolioState) -> RiskCheckResult:
-        limit = PortfolioEngine.equity(portfolio) * self._max_pct
-        value = _proposed_value(rec)
+        limit = _equity(None, self._pe, portfolio) * self._max_pct
+        value = _value_usd(rec, self._pe)
         if value <= limit:
             return RiskCheckResult(self.name, True)
         return RiskCheckResult(self.name, False,
@@ -34,12 +58,13 @@ class MaxPositionSizeRule:
 class MaxExposureRule:
     name = "max_exposure"
 
-    def __init__(self, max_total_exposure_pct: float):
+    def __init__(self, max_total_exposure_pct: float, portfolio_engine: PortfolioEngine | None = None):
         self._max_pct = max_total_exposure_pct
+        self._pe = portfolio_engine
 
     def check(self, rec: Recommendation, portfolio: PortfolioState) -> RiskCheckResult:
-        limit = PortfolioEngine.equity(portfolio) * self._max_pct
-        projected = portfolio.exposure() + _proposed_value(rec)
+        limit = _equity(None, self._pe, portfolio) * self._max_pct
+        projected = _exposure_usd(portfolio, self._pe) + _value_usd(rec, self._pe)
         if projected <= limit:
             return RiskCheckResult(self.name, True)
         return RiskCheckResult(self.name, False,
@@ -49,12 +74,14 @@ class MaxExposureRule:
 class CashReserveRule:
     name = "cash_reserve"
 
-    def __init__(self, min_cash_reserve_pct: float):
+    def __init__(self, min_cash_reserve_pct: float, portfolio_engine: PortfolioEngine | None = None):
         self._min_pct = min_cash_reserve_pct
+        self._pe = portfolio_engine
 
     def check(self, rec: Recommendation, portfolio: PortfolioState) -> RiskCheckResult:
-        reserve = PortfolioEngine.equity(portfolio) * self._min_pct
-        remaining = portfolio.cash - _proposed_value(rec)
+        reserve = _equity(None, self._pe, portfolio) * self._min_pct
+        cost = _value_usd(rec, self._pe)
+        remaining = portfolio.cash - cost
         if remaining >= reserve:
             return RiskCheckResult(self.name, True)
         return RiskCheckResult(self.name, False,
@@ -70,9 +97,71 @@ class RiskEngine:
         return replace(rec, risk_checks=checks)
 
 
-def default_risk_engine(risk_params: dict[str, float]) -> RiskEngine:
+# ---------------------------------------------------------------------------
+# Exit engine (SELL triggers — stop-loss, take-profit, signal decay)
+# ---------------------------------------------------------------------------
+
+class ExitEngine:
+    """Scans open positions and flags those that hit an exit threshold.
+
+    Returns a list of (symbol, reason) tuples; the caller decides whether
+    to execute the corresponding SELL orders.
+
+    TASE P&L is computed purely as a percentage — agorot cancel out, so no
+    currency conversion is needed for exit-trigger math.
+    """
+
+    def __init__(self, stop_loss_pct: float = 0.08, take_profit_pct: float = 0.20,
+                 signal_decay_enabled: bool = False):
+        self._stop = stop_loss_pct
+        self._target = take_profit_pct
+        self._decay = signal_decay_enabled
+
+    def check_exits(
+        self,
+        portfolio: PortfolioState,
+        current_prices: dict[str, float],
+        active_signal_symbols: set[str],
+    ) -> list[tuple[str, str]]:
+        """Return (symbol, reason) pairs for positions that should be closed."""
+        exits: list[tuple[str, str]] = []
+        for pos in portfolio.positions:
+            symbol = pos.instrument.symbol
+            price = current_prices.get(symbol)
+            if price is None or pos.avg_entry_price <= 0:
+                continue
+
+            pnl_pct = (price - pos.avg_entry_price) / pos.avg_entry_price
+
+            if pnl_pct <= -self._stop:
+                exits.append((symbol,
+                               f"stop-loss: {pnl_pct:+.1%} ≤ -{self._stop:.1%} from entry"))
+            elif pnl_pct >= self._target:
+                exits.append((symbol,
+                               f"take-profit: {pnl_pct:+.1%} ≥ +{self._target:.1%} from entry"))
+            elif self._decay and symbol not in active_signal_symbols:
+                exits.append((symbol, "signal-decay: no active signals this scan"))
+
+        return exits
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+def default_risk_engine(risk_params: dict[str, float],
+                        portfolio_engine: PortfolioEngine | None = None) -> RiskEngine:
+    pe = portfolio_engine or PortfolioEngine(risk_params)
     return RiskEngine([
-        MaxPositionSizeRule(risk_params["max_position_pct"]),
-        MaxExposureRule(risk_params["max_total_exposure_pct"]),
-        CashReserveRule(risk_params["min_cash_reserve_pct"]),
+        MaxPositionSizeRule(risk_params["max_position_pct"], pe),
+        MaxExposureRule(risk_params["max_total_exposure_pct"], pe),
+        CashReserveRule(risk_params["min_cash_reserve_pct"], pe),
     ])
+
+
+def default_exit_engine(risk_params: dict[str, float]) -> ExitEngine:
+    return ExitEngine(
+        stop_loss_pct=risk_params.get("stop_loss_pct", 0.08),
+        take_profit_pct=risk_params.get("take_profit_pct", 0.20),
+        signal_decay_enabled=risk_params.get("signal_decay_scans", 0.0) > 0,
+    )

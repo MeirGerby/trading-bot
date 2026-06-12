@@ -22,13 +22,14 @@ import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-import config
 import feedback as fb
 from trading_platform.application.services import recommendation_to_dict
 from trading_platform.bootstrap import build_scan_service
+from trading_platform.config import Settings
 
 logger = logging.getLogger(__name__)
 
+_settings = Settings.from_env()
 scan_service = build_scan_service()
 
 # In-memory: last alert per ticker → signal_types (for feedback linkage)
@@ -146,7 +147,7 @@ async def _handle_feedback(update: Update, positive: bool) -> None:
 
     ticker = match.group(1)
     signal_types = _last_alerts.get(ticker, ["breakout"])  # fallback
-    weights = fb.load_weights(config.DEFAULT_WEIGHTS)
+    weights = scan_service.current_params()
     fb.record_feedback(ticker, signal_types, positive, weights)
 
     icon = "✅" if positive else "❌"
@@ -160,7 +161,7 @@ async def _handle_feedback(update: Update, positive: bool) -> None:
 
 async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Called by the job queue — scans and pushes alerts to the configured chat."""
-    chat_id = config.TELEGRAM_CHAT_ID
+    chat_id = _settings.telegram_chat_id
     if not chat_id:
         logger.warning("TELEGRAM_CHAT_ID not set, skipping scheduled scan")
         return
@@ -181,7 +182,7 @@ async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def build_app() -> Application:
-    token = config.TELEGRAM_BOT_TOKEN
+    token = _settings.telegram_bot_token
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set in .env")
 
@@ -200,7 +201,7 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r"^/bad"), cmd_bad))
 
     # Scheduled job — runs every SCAN_INTERVAL_MINUTES
-    interval = config.SCAN_INTERVAL_MINUTES * 60
+    interval = _settings.scan_interval_minutes * 60
     app.job_queue.run_repeating(scheduled_scan, interval=interval, first=60)
 
     return app
