@@ -1,5 +1,5 @@
 """
-Telegram bot — sends alerts and handles user feedback commands.
+Telegram bot — thin adapter over trading_platform.ScanService.
 
 Commands:
   /start       — welcome message
@@ -9,23 +9,83 @@ Commands:
   /good_TICKER — mark last alert for TICKER as good ✅
   /bad_TICKER  — mark last alert for TICKER as bad ❌
   /watchlist   — show current watchlist
+
+All scanning/decision/risk logic lives in the platform; this module only
+formats messages and records feedback.
 """
+import asyncio
+import json
 import logging
 import os
 import re
-from datetime import datetime
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-import config
 import feedback as fb
-from scanner import scan_all
+from trading_platform.application.services import recommendation_to_dict
+from trading_platform.bootstrap import build_idea_engine, build_scan_service
+from trading_platform.config import Settings
+from trading_platform.config.settings import DEFAULT_RISK_PARAMS, DEFAULT_STRATEGY_PARAMS
 
 logger = logging.getLogger(__name__)
 
+_settings = Settings.from_env()
+scan_service = build_scan_service()
+_idea_engine = build_idea_engine()
+
 # In-memory: last alert per ticker → signal_types (for feedback linkage)
 _last_alerts: dict[str, list[str]] = {}
+
+_ALERTS_LOG = os.path.join(os.path.dirname(__file__), "data", "alerts_log.json")
+_MAX_LOG_ENTRIES = 200
+_MAX_ALERTS_PER_SCAN = 5
+
+_MDV2_SPECIALS = set("_*[]()~`>#+-=|{}.!")
+_ICONS = {"breakout": "🚀", "momentum": "📈", "options": "⚡"}
+
+
+def _esc(text) -> str:
+    return "".join("\\" + ch if ch in _MDV2_SPECIALS else ch for ch in str(text))
+
+
+def format_recommendation(rec: dict) -> str:
+    icons = "".join(_ICONS.get(t, "") for t in rec["signal_types"])
+    lines = [
+        f"{icons} *{_esc(rec['ticker'])}* — ניקוד {rec['score']}",
+        _esc(f"מחיר: ${rec['price']:.2f}"),
+        _esc(f"ביטחון: {rec['confidence'] * 100:.0f}%"),
+    ]
+    for key, value in rec["details"].items():
+        lines.append(_esc(f"• {key}: {value}"))
+    if not rec.get("approved", True):
+        failed = ", ".join(c["rule"] for c in rec["risk_checks"] if not c["passed"])
+        lines.append(_esc(f"⚠️ לא עבר בדיקות סיכון: {failed}"))
+    ticker = rec["ticker"]
+    lines.append(f"/good\\_{ticker} \\| /bad\\_{ticker}")
+    return "\n".join(lines)
+
+
+def log_alert(rec: dict) -> None:
+    """Append a sent alert to the dashboard's alert history."""
+    try:
+        os.makedirs(os.path.dirname(_ALERTS_LOG), exist_ok=True)
+        if os.path.exists(_ALERTS_LOG):
+            with open(_ALERTS_LOG) as f:
+                store = json.load(f)
+        else:
+            store = {"alerts": []}
+        store["alerts"].append(rec)
+        store["alerts"] = store["alerts"][-_MAX_LOG_ENTRIES:]
+        with open(_ALERTS_LOG, "w") as f:
+            json.dump(store, f, indent=2, ensure_ascii=False)
+    except Exception:
+        logger.exception("Failed to log alert for %s", rec.get("ticker"))
+
+
+async def _scan_recommendations() -> list[dict]:
+    report = await asyncio.to_thread(scan_service.scan)
+    return [recommendation_to_dict(r) for r in report.recommendations]
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -36,41 +96,41 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/weights — הגדרות סיגנלים\n"
         "/feedback — היסטוריית פידבק\n"
         "/watchlist — רשימת מניות\n"
+        "/ideas — רעיונות AI Advisor אחרונים\n"
         "/good\\_TICKER | /bad\\_TICKER — פידבק על התראה",
         parse_mode="MarkdownV2",
     )
 
 
 async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    weights = fb.load_weights(config.DEFAULT_WEIGHTS)
-    await update.message.reply_text("🔍 סורק שוק... זה יכול לקחת כ-30 שניות.")
-    signals = scan_all(config.WATCHLIST, weights)
+    await update.message.reply_text("🔍 סורק שוק... זה יכול לקחת מספר דקות.")
+    recs = await _scan_recommendations()
 
-    if not signals:
+    if not recs:
         await update.message.reply_text("לא נמצאו הזדמנויות ברגע זה.")
         return
 
-    for sig in signals[:5]:  # cap at 5 per scan
-        _last_alerts[sig.ticker] = sig.signal_types
-        await update.message.reply_text(sig.format_message(), parse_mode="MarkdownV2")
+    for rec in recs[:_MAX_ALERTS_PER_SCAN]:
+        _last_alerts[rec["ticker"]] = rec["signal_types"]
+        log_alert(rec)
+        await update.message.reply_text(format_recommendation(rec), parse_mode="MarkdownV2")
 
 
 async def cmd_weights(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    weights = fb.load_weights(config.DEFAULT_WEIGHTS)
+    weights = scan_service.current_params()
     lines = ["⚙️ *משקלי סיגנלים נוכחיים:*\n"]
     for k, v in weights.items():
-        lines.append(f"  `{k}`: {v}")
+        lines.append(f"  `{_esc(k)}`: {_esc(v)}")
     await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
 
 
 async def cmd_feedback_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    summary = fb.get_feedback_summary()
-    await update.message.reply_text(summary)
+    await update.message.reply_text(fb.get_feedback_summary())
 
 
 async def cmd_watchlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    tickers = ", ".join(config.WATCHLIST)
-    await update.message.reply_text(f"📋 *Watchlist:*\n{tickers}", parse_mode="MarkdownV2")
+    tickers = ", ".join(scan_service.active_watchlist())
+    await update.message.reply_text(f"📋 *Watchlist:*\n{_esc(tickers)}", parse_mode="MarkdownV2")
 
 
 async def cmd_good(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,7 +143,6 @@ async def cmd_bad(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _handle_feedback(update: Update, positive: bool) -> None:
     text = update.message.text or ""
-    # Extract ticker from /good_AAPL or /bad_AAPL
     match = re.match(r"^/(?:good|bad)[_\s]+([A-Z]+)", text.upper())
     if not match:
         await update.message.reply_text("שימוש: /good\\_TICKER או /bad\\_TICKER", parse_mode="MarkdownV2")
@@ -91,8 +150,8 @@ async def _handle_feedback(update: Update, positive: bool) -> None:
 
     ticker = match.group(1)
     signal_types = _last_alerts.get(ticker, ["breakout"])  # fallback
-    weights = fb.load_weights(config.DEFAULT_WEIGHTS)
-    updated = fb.record_feedback(ticker, signal_types, positive, weights)
+    weights = scan_service.current_params()
+    fb.record_feedback(ticker, signal_types, positive, weights)
 
     icon = "✅" if positive else "❌"
     direction = "גבוהים יותר" if positive else "נמוכים יותר"
@@ -103,31 +162,79 @@ async def _handle_feedback(update: Update, positive: bool) -> None:
     )
 
 
+async def cmd_ideas(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the most recent AI Advisor ideas."""
+    ideas = _idea_engine.get_recent_ideas(5)
+    if not ideas:
+        await update.message.reply_text("💡 אין רעיונות עדיין — הסוכן ירוץ בשעות הקרובות\\.",
+                                        parse_mode="MarkdownV2")
+        return
+    lines = ["💡 *AI Advisor — רעיונות אחרונים:*\n"]
+    _priority_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    for idea in ideas:
+        icon = _priority_icon.get(idea.get("priority", "low"), "⚪")
+        lines.append(f"{icon} *{_esc(idea['title'])}*")
+        lines.append(_esc(idea["rationale"]))
+        lines.append("")
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
+
+
+async def scheduled_ideas(ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Daily AI Advisor cycle — runs ideas and sends Telegram digest."""
+    chat_id = _settings.telegram_chat_id
+    if not chat_id:
+        return
+    try:
+        s_params = dict(DEFAULT_STRATEGY_PARAMS)
+        s_params.update(scan_service.current_params())
+        r_params = dict(DEFAULT_RISK_PARAMS)
+        applied = await asyncio.to_thread(
+            _idea_engine.run_daily_cycle, s_params, r_params)
+    except Exception:
+        logger.exception("scheduled_ideas: idea engine failed")
+        return
+
+    if not applied:
+        return
+
+    from datetime import date
+    today = date.today().strftime("%d/%m")
+    _priority_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    lines = [f"💡 *AI Advisor — סיכום יומי \\({_esc(today)}\\)*\n",
+             _esc(f"יושמו {len(applied)} שיפורים אוטומטיים:"), ""]
+    for idea in applied[:5]:
+        icon = _priority_icon.get(idea.priority, "⚪")
+        lines.append(f"{icon} *\\[{_esc(idea.category)}\\]* {_esc(idea.title)}")
+        lines.append(f"  {_esc(idea.rationale)}")
+        lines.append("")
+    await ctx.bot.send_message(chat_id=chat_id, text="\n".join(lines),
+                               parse_mode="MarkdownV2")
+
+
 async def scheduled_scan(ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Called by APScheduler — scans and pushes alerts to the configured chat."""
-    chat_id = config.TELEGRAM_CHAT_ID
+    """Called by the job queue — scans and pushes alerts to the configured chat."""
+    chat_id = _settings.telegram_chat_id
     if not chat_id:
         logger.warning("TELEGRAM_CHAT_ID not set, skipping scheduled scan")
         return
 
-    weights = fb.load_weights(config.DEFAULT_WEIGHTS)
-    signals = scan_all(config.WATCHLIST, weights)
-
-    if not signals:
-        logger.info("Scheduled scan: no signals found")
+    recs = await _scan_recommendations()
+    if not recs:
+        logger.info("Scheduled scan: no recommendations")
         return
 
-    for sig in signals[:5]:
-        _last_alerts[sig.ticker] = sig.signal_types
+    for rec in recs[:_MAX_ALERTS_PER_SCAN]:
+        _last_alerts[rec["ticker"]] = rec["signal_types"]
+        log_alert(rec)
         await ctx.bot.send_message(
             chat_id=chat_id,
-            text=sig.format_message(),
+            text=format_recommendation(rec),
             parse_mode="MarkdownV2",
         )
 
 
 def build_app() -> Application:
-    token = config.TELEGRAM_BOT_TOKEN
+    token = _settings.telegram_bot_token
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set in .env")
 
@@ -138,6 +245,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("weights", cmd_weights))
     app.add_handler(CommandHandler("feedback", cmd_feedback_summary))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))
+    app.add_handler(CommandHandler("ideas", cmd_ideas))
 
     # /good_AAPL and /bad_AAPL — registered as prefix handlers via MessageHandler
     from telegram.ext import MessageHandler, filters
@@ -146,7 +254,10 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r"^/bad"), cmd_bad))
 
     # Scheduled job — runs every SCAN_INTERVAL_MINUTES
-    interval = config.SCAN_INTERVAL_MINUTES * 60
+    interval = _settings.scan_interval_minutes * 60
     app.job_queue.run_repeating(scheduled_scan, interval=interval, first=60)
+
+    # Daily AI Advisor cycle — first run 1 h after startup
+    app.job_queue.run_repeating(scheduled_ideas, interval=86400, first=3600)
 
     return app
