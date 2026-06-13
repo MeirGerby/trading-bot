@@ -104,14 +104,20 @@ class RiskEngine:
 class ExitEngine:
     """Scans open positions and flags those that hit an exit threshold.
 
-    Returns a list of (symbol, reason) tuples; the caller decides whether
-    to execute the corresponding SELL orders.
+    Three aggressive exit triggers, evaluated per open position:
+      1. take-profit — unrealized P&L ≥ +take_profit_pct  → lock in the gain
+      2. stop-loss   — unrealized P&L ≤ -stop_loss_pct     → cut the reversal
+      3. signal-decay — the symbol no longer has an active momentum /
+         trend-following signal this scan → exit regardless of P&L
+
+    Returns a list of (symbol, reason) tuples; the caller decides whether to
+    execute the corresponding SELL orders and computes realized P&L.
 
     TASE P&L is computed purely as a percentage — agorot cancel out, so no
     currency conversion is needed for exit-trigger math.
     """
 
-    def __init__(self, stop_loss_pct: float = 0.08, take_profit_pct: float = 0.20,
+    def __init__(self, stop_loss_pct: float = 0.005, take_profit_pct: float = 0.01,
                  signal_decay_enabled: bool = False):
         self._stop = stop_loss_pct
         self._target = take_profit_pct
@@ -121,9 +127,15 @@ class ExitEngine:
         self,
         portfolio: PortfolioState,
         current_prices: dict[str, float],
-        active_signal_symbols: set[str],
+        trend_supporting_symbols: set[str],
     ) -> list[tuple[str, str]]:
-        """Return (symbol, reason) pairs for positions that should be closed."""
+        """Return (symbol, reason) pairs for positions that should be closed.
+
+        ``trend_supporting_symbols`` are the symbols that still produced a
+        momentum or trend-following signal in the current scan. A held symbol
+        absent from this set has lost its thesis and is flagged for a
+        signal-decay exit.
+        """
         exits: list[tuple[str, str]] = []
         for pos in portfolio.positions:
             symbol = pos.instrument.symbol
@@ -133,14 +145,17 @@ class ExitEngine:
 
             pnl_pct = (price - pos.avg_entry_price) / pos.avg_entry_price
 
-            if pnl_pct <= -self._stop:
+            # Take-profit first: in a scalping regime the priority is to lock
+            # in the small gain the moment the micro-target is reached.
+            if pnl_pct >= self._target:
                 exits.append((symbol,
-                               f"stop-loss: {pnl_pct:+.1%} ≤ -{self._stop:.1%} from entry"))
-            elif pnl_pct >= self._target:
+                               f"take-profit: {pnl_pct:+.2%} ≥ +{self._target:.2%} target reached"))
+            elif pnl_pct <= -self._stop:
                 exits.append((symbol,
-                               f"take-profit: {pnl_pct:+.1%} ≥ +{self._target:.1%} from entry"))
-            elif self._decay and symbol not in active_signal_symbols:
-                exits.append((symbol, "signal-decay: no active signals this scan"))
+                               f"stop-loss: {pnl_pct:+.2%} ≤ -{self._stop:.2%} from entry"))
+            elif self._decay and symbol not in trend_supporting_symbols:
+                exits.append((symbol,
+                               f"signal-decay: momentum/trend signal gone ({pnl_pct:+.2%} P&L)"))
 
         return exits
 
@@ -160,8 +175,12 @@ def default_risk_engine(risk_params: dict[str, float],
 
 
 def default_exit_engine(risk_params: dict[str, float]) -> ExitEngine:
+    decay_enabled = (
+        bool(risk_params.get("signal_decay_enabled", 0.0))
+        or risk_params.get("signal_decay_scans", 0.0) > 0
+    )
     return ExitEngine(
-        stop_loss_pct=risk_params.get("stop_loss_pct", 0.08),
-        take_profit_pct=risk_params.get("take_profit_pct", 0.20),
-        signal_decay_enabled=risk_params.get("signal_decay_scans", 0.0) > 0,
+        stop_loss_pct=risk_params.get("stop_loss_pct", 0.005),
+        take_profit_pct=risk_params.get("take_profit_pct", 0.01),
+        signal_decay_enabled=decay_enabled,
     )

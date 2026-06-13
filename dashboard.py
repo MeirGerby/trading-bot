@@ -280,6 +280,10 @@ def get_portfolio():
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
+    risk_params = _scan_service.effective_risk_params()
+    tp_pct = float(risk_params.get("take_profit_pct", 0.01))
+    sl_pct = float(risk_params.get("stop_loss_pct", 0.005))
+
     positions = []
     for pos in state.positions:
         current_price = _scan_service._market_data.get_last_price(pos.instrument.symbol)
@@ -300,6 +304,12 @@ def get_portfolio():
                 (current_price / pos.avg_entry_price - 1) * 100
                 if current_price and pos.avg_entry_price > 0 else 0.0, 2
             ),
+            # Active exit targets (entry × (1 ± pct)), in the same vendor-native
+            # units as avg_entry_price so the UI can show them inline.
+            "take_profit_price": round(pos.avg_entry_price * (1 + tp_pct), 4),
+            "stop_loss_price": round(pos.avg_entry_price * (1 - sl_pct), 4),
+            "take_profit_pct": round(tp_pct * 100, 2),
+            "stop_loss_pct": round(sl_pct * 100, 2),
         })
 
     total_market_value = sum(p["market_value"] for p in positions)

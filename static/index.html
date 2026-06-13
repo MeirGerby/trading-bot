@@ -748,23 +748,37 @@ async function loadTrades() {
     // Preserve open reasoning panels across refresh
     const openPanels = new Set([...document.querySelectorAll('#trades-container .reasoning-panel.open')].map(p => p.id));
     el.innerHTML = data.trades.slice(0, 15).map(t => {
-      const sideCls = t.side === 'buy' ? 'trade-side-buy' : 'trade-side-sell';
-      const sideTxt = t.side === 'buy' ? '▲ BUY' : '▼ SELL';
+      const isSell = t.side === 'sell';
+      const sideCls = isSell ? 'trade-side-sell' : 'trade-side-buy';
+      const sideTxt = isSell ? '▼ SELL' : '▲ BUY';
       const statusCls = t.status === 'filled' ? 'filled' : 'rejected';
       const marketTag = `<span class="market-tag market-${t.market||'US'}">${t.market === 'TASE' ? '🇮🇱' : '🇺🇸'} ${t.market||'US'}</span>`;
       const reasonId = `trade-reason-${t.order_id}`;
       const isOpen = openPanels.has(reasonId) ? ' open' : '';
+      // Realized P&L chip — only on closing (sell) executions
+      let pnlChip = '';
+      if (isSell && t.realized_pnl_pct != null) {
+        const cls = t.realized_pnl_pct >= 0 ? 'pnl-positive' : 'pnl-negative';
+        const psign = t.realized_pnl_pct >= 0 ? '+' : '';
+        const amt = t.market === 'TASE' ? '₪' + (Number(t.realized_pnl)/100).toLocaleString() : fmtUSD(t.realized_pnl);
+        pnlChip = `<span class="metric-chip ${cls}">P&amp;L ${psign}${t.realized_pnl_pct}% (${psign}${amt})</span>`;
+      }
+      // Show the exit reason inline for sells (e.g. "take-profit: +0.75% target reached")
+      const exitReason = isSell && t.reasoning
+        ? `<span style="font-size:11px;color:#94a3b8">${escapeHtml(t.reasoning)}</span>` : '';
       return `<div class="trade-row ${statusCls}">
         <div class="trade-head">
           <span class="${sideCls}">${sideTxt}</span>
           <strong>${t.symbol}</strong>
           ${marketTag}
           <span class="price">${t.quantity} × ${fmtMarketPrice(t.price, t.market)} = ${t.market === 'TASE' ? '₪' + (Number(t.value)/100).toLocaleString() : '$' + Number(t.value).toLocaleString()}</span>
-          <span class="metric-chip">ביטחון ${Math.round((t.confidence||0)*100)}%</span>
+          ${pnlChip}
+          ${isSell ? '' : `<span class="metric-chip">ביטחון ${Math.round((t.confidence||0)*100)}%</span>`}
           ${t.status === 'rejected' ? `<span class="down" style="font-size:11px">נדחה: ${t.reject_reason||''}</span>` : ''}
           <span class="time">${fmt(t.ts)}</span>
           <button class="reasoning-toggle" onclick="toggleReasoning('${reasonId}')">🤖 למה? ▾</button>
         </div>
+        ${exitReason}
         <div class="reasoning-panel${isOpen}" id="${reasonId}">${escapeHtml(t.reasoning||'')}</div>
       </div>`;
     }).join('');
@@ -955,16 +969,21 @@ async function loadPortfolio() {
     }
     let html = `<table><thead><tr>
       <th>סימבול</th><th>כמות</th><th>מחיר כניסה</th><th>מחיר נוכחי</th>
+      <th>🎯 יעד רווח</th><th>🛑 סטופ</th>
       <th>שווי שוק</th><th>עלות</th><th>רווח/הפסד</th><th>%</th>
     </tr></thead><tbody>`;
     for (const p of data.positions) {
       const pnlCls = pnlClass(p.unrealized_pnl);
       const sign = p.unrealized_pnl >= 0 ? '+' : '';
+      const cur = p.symbol.endsWith('.TA') ? '₪' : '$';
+      const px = v => v == null ? '—' : cur + v;
       html += `<tr>
         <td><strong>${p.symbol}</strong></td>
         <td>${p.quantity}</td>
-        <td class="price">$${p.avg_entry_price}</td>
-        <td class="price">${p.current_price ? '$'+p.current_price : '—'}</td>
+        <td class="price">${px(p.avg_entry_price)}</td>
+        <td class="price">${px(p.current_price)}</td>
+        <td class="up" title="+${p.take_profit_pct}% מהכניסה">${px(p.take_profit_price)}</td>
+        <td class="down" title="-${p.stop_loss_pct}% מהכניסה">${px(p.stop_loss_price)}</td>
         <td>${fmtUSD(p.market_value)}</td>
         <td class="neutral">${fmtUSD(p.cost_basis)}</td>
         <td class="${pnlCls}">${sign}${fmtUSD(p.unrealized_pnl)}</td>

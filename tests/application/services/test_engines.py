@@ -219,9 +219,40 @@ class TestExitEngine:
     def test_signal_decay_triggers_when_enabled(self):
         engine = ExitEngine(stop_loss_pct=0.08, take_profit_pct=0.20, signal_decay_enabled=True)
         pf = self._portfolio_with("AAPL", 10, 100.0)
-        exits = engine.check_exits(pf, {"AAPL": 100.0}, set())  # AAPL not in active signals
+        exits = engine.check_exits(pf, {"AAPL": 100.0}, set())  # AAPL has no trend signal
         assert len(exits) == 1
         assert "signal-decay" in exits[0][1]
+        assert "momentum/trend" in exits[0][1]
+
+    def test_signal_decay_held_when_trend_signal_present(self):
+        engine = ExitEngine(stop_loss_pct=0.08, take_profit_pct=0.20, signal_decay_enabled=True)
+        pf = self._portfolio_with("AAPL", 10, 100.0)
+        # AAPL still has an active momentum/trend signal → keep holding
+        exits = engine.check_exits(pf, {"AAPL": 100.0}, {"AAPL"})
+        assert exits == []
+
+    def test_scalping_micro_take_profit(self):
+        # Default scalping thresholds: +1% locks profit
+        engine = ExitEngine()  # defaults 0.005 / 0.01
+        pf = self._portfolio_with("HOOD", 100, 50.0)
+        exits = engine.check_exits(pf, {"HOOD": 50.6}, {"HOOD"})  # +1.2%
+        assert len(exits) == 1
+        assert "take-profit" in exits[0][1]
+
+    def test_scalping_tight_stop_loss(self):
+        engine = ExitEngine()  # defaults 0.005 / 0.01
+        pf = self._portfolio_with("HOOD", 100, 50.0)
+        exits = engine.check_exits(pf, {"HOOD": 49.6}, {"HOOD"})  # -0.8%
+        assert len(exits) == 1
+        assert "stop-loss" in exits[0][1]
+
+    def test_take_profit_takes_priority_over_decay(self):
+        # At target AND no trend signal → take-profit wins (locks the gain)
+        engine = ExitEngine(signal_decay_enabled=True)
+        pf = self._portfolio_with("HOOD", 100, 50.0)
+        exits = engine.check_exits(pf, {"HOOD": 50.6}, set())  # +1.2%, no signal
+        assert len(exits) == 1
+        assert "take-profit" in exits[0][1]
 
     def test_no_exit_when_price_missing(self):
         engine = ExitEngine(stop_loss_pct=0.05, take_profit_pct=0.10)
